@@ -1,0 +1,42 @@
+# Environments & Secrets
+.env
+.env.*
+!.env.example
+
+# Python & Django
+__pycache__/
+*.py[cod]
+*$py.class
+*.sqlite3
+.venv/
+venv/
+ENV/
+env/
+catalog_backend/staticfiles/
+catalog_backend/media/
+staticfiles/
+media/
+*.log
+
+# Node & Next.js
+node_modules/
+.next/
+out/
+build/
+dist/
+catalog_frontend/node_modules/
+catalog_frontend/.next/
+catalog_frontend/out/
+.npm
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
