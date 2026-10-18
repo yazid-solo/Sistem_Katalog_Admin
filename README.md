@@ -83,10 +83,11 @@ docker exec -it katalog_backend python manage.py seed_data --clean
 
 ### 2. Ongkos Kirim & Transaksi
 - `GET /api/shipping-rates/` — Tarif ongkos kirim provinsi di Indonesia.
-- `POST /api/checkout/` — Pembuatan pesanan atomik & pemotongan stok otomatis.
-- `GET /api/orders/<tracking_number>/` — Pelacakan status pesanan publik.
-- `GET /api/admin/orders/` — Rekap pesanan admin toko (dengan filtering status).
-- `PATCH /api/admin/orders/<id>/` — Perbarui status pesanan, kurir, dan nomor resi.
+- `POST /api/orders/checkout/` — Pembuatan pesanan atomik & pemotongan stok otomatis.
+- `GET /api/orders/<order_number>/` — Pelacakan status pesanan publik (live progress stepper).
+- `GET /api/seller/orders/` — Rekap pesanan admin toko (dengan filtering status).
+- `PATCH /api/seller/orders/<order_number>/status/` — Perbarui status pesanan, kurir, dan nomor resi kurir.
+- `PATCH /api/seller/variants/<id>/stock/` — Update stok varian langsung dari admin.
 
 ---
 
