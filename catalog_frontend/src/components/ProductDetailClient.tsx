@@ -62,7 +62,7 @@ function ImageLightbox({
       </button>
 
       {/* Hint */}
-      <p className="absolute top-5 left-1/2 -translate-x-1/2 text-white/40 text-xs">
+      <p className="hidden sm:block absolute top-5 left-1/2 -translate-x-1/2 text-white/40 text-xs">
         Klik di luar foto atau tekan Esc untuk menutup
       </p>
 
@@ -94,7 +94,7 @@ function ImageLightbox({
 
       {/* Main image */}
       <div
-        className="relative max-w-3xl max-h-[85vh] w-full"
+        className="relative max-w-3xl max-h-[85vh] max-h-[85dvh] w-full"
         style={{ aspectRatio: '4/5' }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -209,7 +209,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
   const { addToCart } = useCart();
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
-  const colors = product.variants_by_color;
+  const colors = product?.variants_by_color || [];
 
   // Initial color
   const initialColor = colors[0]?.color ?? '';
@@ -222,13 +222,13 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   // Build ordered image list for lightbox (all images)
-  const allImages = useMemo(() => (product.images && product.images.length > 0 ? product.images : []), [product.images]);
+  const allImages = useMemo(() => (product?.images && product.images.length > 0 ? product.images : []), [product?.images]);
 
   // Active gallery image
   const defaultImage =
-    product.primary_image ||
-    product.images.find((img) => img.is_primary)?.image_url ||
-    product.images[0]?.image_url ||
+    product?.primary_image ||
+    product?.images?.find((img) => img.is_primary)?.image_url ||
+    product?.images?.[0]?.image_url ||
     colors.find((c) => c.color === initialColor)?.color_image ||
     '';
   const [activeImage, setActiveImage] = useState<string>(defaultImage);
@@ -238,7 +238,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
 
   // Currently selected variant
   const selectedVariant = selectedSize && selectedColor
-    ? product.variants.find((v) => v.size === selectedSize && v.color === selectedColor)
+    ? (product?.variants || []).find((v) => v.size === selectedSize && v.color === selectedColor)
     : null;
 
   // When user clicks a color
@@ -246,7 +246,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
     setSelectedColor(newColor);
     setSelectedSize(null);
 
-    const matchingColorImg = product.images.find(
+    const matchingColorImg = (product?.images || []).find(
       (img) => img.color && img.color.toLowerCase().trim() === newColor.toLowerCase().trim()
     );
 
@@ -328,7 +328,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
   return (
     <>
       {/* ─── BREADCRUMB ──────────────────────────────── */}
-      <nav className="flex items-center gap-1.5 text-xs text-stone-400 mb-6" aria-label="Breadcrumb">
+      <nav className="flex flex-wrap items-center gap-1.5 text-xs text-stone-400 mb-6" aria-label="Breadcrumb">
         <Link href="/" className="hover:text-zinc-900 transition-colors">Beranda</Link>
         <span>›</span>
         {product.category && (
@@ -342,7 +342,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
             <span>›</span>
           </>
         )}
-        <span className="text-zinc-700 font-medium line-clamp-1 max-w-[200px]">{product.title}</span>
+        <span className="text-zinc-700 font-medium line-clamp-1 max-w-[160px] sm:max-w-[240px]">{product.title}</span>
       </nav>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-16 animate-fade-in">
@@ -401,9 +401,9 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
           </div>
 
           {/* Thumbnails Row */}
-          {product.images.length > 1 && (
+          {(product?.images || []).length > 1 && (
             <div className="flex gap-2.5 overflow-x-auto pb-2 scrollbar-hide">
-              {product.images.map((img: ProductImage, idx: number) => {
+              {(product?.images || []).map((img: ProductImage, idx: number) => {
                 const isSelected = activeImage === img.image_url;
                 return (
                   <button
@@ -457,7 +457,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
         {/* ─────────────────────────────────────────
             RIGHT: Product Details & Selectors
             ───────────────────────────────────────── */}
-        <div className="lg:sticky lg:top-24 lg:self-start space-y-6 animate-slide-up">
+        <div className="lg:sticky lg:top-24 lg:self-start lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto lg:overscroll-contain lg:px-1 lg:-mx-1 space-y-6 animate-slide-up">
           {/* Category Tag */}
           {product.category && (
             <p className="text-[10px] font-semibold tracking-[0.3em] uppercase text-stone-400">
@@ -467,7 +467,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
 
           {/* Product Title + Share */}
           <div className="flex items-start justify-between gap-3">
-            <h1 className="text-2xl md:text-3xl font-medium text-zinc-900 leading-tight tracking-tight flex-1">
+            <h1 className="text-2xl md:text-3xl font-medium text-zinc-900 leading-tight tracking-tight flex-1 min-w-0 break-words">
               {product.title}
             </h1>
             <button
@@ -495,7 +495,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
           {/* ─── COLOR SELECTOR ─── */}
           {colors.length > 0 && (
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                 <p className="text-xs font-semibold tracking-wider uppercase text-zinc-900">
                   Pilihan Warna: <span className="font-normal text-stone-500">{selectedColor}</span>
                 </p>
@@ -541,7 +541,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
 
           {/* ─── SIZE SELECTOR ─── */}
           <div className="space-y-3 pt-1">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
               <p className="text-xs font-semibold tracking-wider uppercase text-zinc-900">
                 Pilih Ukuran:
               </p>
@@ -556,7 +556,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
             </div>
 
             <div className="flex flex-wrap gap-2.5" role="group" aria-label="Pilih ukuran baju">
-              {currentColorData?.sizes.map((variant) => {
+              {(currentColorData?.sizes || []).map((variant) => {
                 const isSoldOut = !variant.is_available;
                 const isSelected = selectedSize === variant.size;
 
@@ -594,7 +594,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
                 <p className="font-semibold text-zinc-800">Stok size {selectedSize} per warna:</p>
                 <div className="flex flex-wrap gap-2">
                   {colors.map((c) => {
-                    const sizeInfo = c.sizes.find((s) => s.size === selectedSize);
+                    const sizeInfo = (c.sizes || []).find((s) => s.size === selectedSize);
                     return (
                       <span
                         key={c.color}
@@ -617,7 +617,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
             {/* Detail ukuran */}
             {selectedVariant && (
               <div className="mt-3 p-3.5 bg-stone-50 border border-stone-200/80 rounded-xl space-y-1.5 animate-fade-in text-xs">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-semibold text-zinc-900 flex items-center gap-1.5">
                     <span>📐</span> Detail Ukuran {selectedVariant.size}:
                   </span>
@@ -698,7 +698,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
             </div>
 
             {/* WhatsApp + Share */}
-            <div className="flex items-center justify-between pt-1">
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 pt-1">
               <a
                 href={whatsappUrl}
                 target="_blank"
@@ -708,7 +708,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="#25D366">
                   <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
                 </svg>
-                <span>Tanya Admin via WhatsApp</span>
+                <span>Konsultasi Produk via WhatsApp</span>
               </a>
 
               <button
@@ -741,7 +741,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
       </div>
 
       {/* ─── STICKY BAR (MOBILE ONLY) ─── */}
-      <div className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t border-stone-200 p-3 md:hidden">
+      <div className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t border-stone-200 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:hidden">
         <div className="flex gap-2.5">
           <button
             type="button"
@@ -772,7 +772,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
 
       {/* ─── TOAST NOTIFICATION ─── */}
       {toastMsg && (
-        <div className="fixed bottom-20 md:bottom-8 right-4 md:right-8 z-50 max-w-sm bg-zinc-900 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center justify-between gap-3 text-xs font-medium animate-slide-up border border-white/10">
+        <div className="fixed bottom-24 md:bottom-8 left-4 right-4 md:left-auto md:right-8 z-50 md:max-w-sm bg-zinc-900 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center justify-between gap-3 text-xs font-medium animate-slide-up border border-white/10">
           <span className="flex-1">{toastMsg}</span>
           <Link
             href="/keranjang"

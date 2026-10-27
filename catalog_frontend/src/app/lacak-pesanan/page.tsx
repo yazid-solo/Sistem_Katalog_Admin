@@ -109,7 +109,7 @@ function LacakPesananContent() {
   const currentStep = orderData ? getStepProgress(orderData.status) : 0;
   const isCancelled = orderData?.status === 'CANCELLED';
 
-  const sellerPhone = '6283835782010';
+  const sellerPhone = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || '';
   const waHelpUrl = orderData
     ? `https://wa.me/${sellerPhone}?text=${encodeURIComponent(
         `Halo Admin, saya ingin menanyakan status pesanan saya dengan nomor *${orderData.order_number}* atas nama *${orderData.customer_name}*. Terima kasih.`
@@ -180,14 +180,14 @@ function LacakPesananContent() {
 
         {/* Order Result Card */}
         {orderData && (
-          <div className="bg-white rounded-2xl border border-stone-200/80 shadow-sm p-6 sm:p-8 space-y-8 animate-fade-in">
+          <div className="bg-white rounded-2xl border border-stone-200/80 shadow-sm p-4 sm:p-8 space-y-8 animate-fade-in">
             {/* Order Header Summary */}
             <div className="flex flex-wrap items-center justify-between gap-4 pb-6 border-b border-stone-100">
-              <div className="space-y-1">
+              <div className="space-y-1 min-w-0">
                 <span className="text-xs font-semibold text-stone-400 uppercase tracking-wider">
                   Nomor Pesanan
                 </span>
-                <h2 className="text-2xl font-bold text-zinc-900 font-mono">
+                <h2 className="text-lg min-[400px]:text-xl sm:text-2xl font-bold text-zinc-900 font-mono break-all">
                   {orderData.order_number}
                 </h2>
                 <p className="text-xs text-stone-500">
@@ -245,7 +245,7 @@ function LacakPesananContent() {
                   </div>
 
                   {/* Step 1 */}
-                  <div className="relative z-10 flex flex-col items-center text-center w-24">
+                  <div className="relative z-10 flex flex-col items-center text-center flex-1 min-w-0 sm:flex-none sm:w-24">
                     <div
                       className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs transition-colors shadow-sm ${
                         currentStep >= 1 ? 'bg-emerald-600 text-white' : 'bg-stone-200 text-stone-500'
@@ -258,7 +258,7 @@ function LacakPesananContent() {
                   </div>
 
                   {/* Step 2 */}
-                  <div className="relative z-10 flex flex-col items-center text-center w-24">
+                  <div className="relative z-10 flex flex-col items-center text-center flex-1 min-w-0 sm:flex-none sm:w-24">
                     <div
                       className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs transition-colors shadow-sm ${
                         currentStep >= 2 ? 'bg-emerald-600 text-white' : 'bg-stone-200 text-stone-500'
@@ -271,7 +271,7 @@ function LacakPesananContent() {
                   </div>
 
                   {/* Step 3 */}
-                  <div className="relative z-10 flex flex-col items-center text-center w-24">
+                  <div className="relative z-10 flex flex-col items-center text-center flex-1 min-w-0 sm:flex-none sm:w-24">
                     <div
                       className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs transition-colors shadow-sm ${
                         currentStep >= 3 ? 'bg-emerald-600 text-white' : 'bg-stone-200 text-stone-500'
@@ -284,7 +284,7 @@ function LacakPesananContent() {
                   </div>
 
                   {/* Step 4 */}
-                  <div className="relative z-10 flex flex-col items-center text-center w-24">
+                  <div className="relative z-10 flex flex-col items-center text-center flex-1 min-w-0 sm:flex-none sm:w-24">
                     <div
                       className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs transition-colors shadow-sm ${
                         currentStep >= 4 ? 'bg-emerald-600 text-white' : 'bg-stone-200 text-stone-500'
@@ -339,8 +339,8 @@ function LacakPesananContent() {
                 </h3>
                 <div className="divide-y divide-stone-100 border border-stone-200/80 rounded-xl p-4 bg-stone-50/40">
                   {orderData.items.map((item) => (
-                    <div key={item.id} className="py-3 first:pt-0 last:pb-0 flex justify-between items-center text-xs">
-                      <div className="space-y-0.5">
+                    <div key={item.id} className="py-3 first:pt-0 last:pb-0 flex justify-between items-center gap-3 text-xs">
+                      <div className="space-y-0.5 min-w-0">
                         <p className="font-bold text-zinc-900 text-sm">{item.product_title}</p>
                         <p className="text-stone-500">
                           Warna: <span className="font-semibold text-zinc-800">{item.color}</span> · Ukuran: <span className="font-semibold text-zinc-800">{item.size}</span>
@@ -349,7 +349,7 @@ function LacakPesananContent() {
                           {item.quantity} pcs x Rp {Number(item.unit_price).toLocaleString('id-ID')}
                         </p>
                       </div>
-                      <span className="font-bold text-zinc-900 text-sm">
+                      <span className="font-bold text-zinc-900 text-sm shrink-0 whitespace-nowrap">
                         Rp {Number(item.subtotal).toLocaleString('id-ID')}
                       </span>
                     </div>
@@ -364,9 +364,9 @@ function LacakPesananContent() {
                     </span>
                   </div>
                   <div className="flex justify-between text-stone-600">
-                    <span>Ongkos Kirim ({orderData.shipping_province}):</span>
+                    <span>Daerah Pengiriman:</span>
                     <span className="font-semibold text-zinc-900">
-                      Rp {Number(orderData.shipping_cost).toLocaleString('id-ID')}
+                      {orderData.shipping_province}
                     </span>
                   </div>
                   <div className="divider my-1" />
@@ -413,7 +413,7 @@ function LacakPesananContent() {
                 <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-xl space-y-2 text-xs">
                   <p className="font-bold text-emerald-900">Butuh Bantuan Pesanan Ini?</p>
                   <p className="text-emerald-800 text-[11px]">
-                    Hubungi admin toko kami di WhatsApp untuk konfirmasi bukti bayar atau perubahan data pengiriman.
+                    Hubungi layanan pelanggan kami di WhatsApp untuk konfirmasi bukti bayar atau perubahan data pengiriman.
                   </p>
                   <a
                     href={waHelpUrl}
@@ -422,7 +422,7 @@ function LacakPesananContent() {
                     className="inline-flex items-center gap-2 w-full justify-center py-2.5 bg-[#25D366] hover:bg-[#1EBE5D] text-white font-semibold rounded-lg shadow-sm transition-colors text-xs"
                   >
                     <span>💬</span>
-                    <span>Chat Admin WhatsApp</span>
+                    <span>Hubungi Layanan Pelanggan (WhatsApp)</span>
                   </a>
                 </div>
               </div>

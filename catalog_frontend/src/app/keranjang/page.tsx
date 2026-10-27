@@ -8,11 +8,36 @@ import { useCart } from '@/context/CartContext';
 import { getShippingRates, submitCheckout } from '@/lib/api';
 import type { ShippingRate, CheckoutResponse } from '@/types';
 
+const DEFAULT_SHIPPING_RATES: ShippingRate[] = [
+  { id: 1, province: 'DKI Jakarta', cost: '10000', formatted_cost: 'Rp 10.000', estimated_delivery: '1-2 Hari', sort_order: 1 },
+  { id: 2, province: 'Jawa Barat', cost: '10000', formatted_cost: 'Rp 10.000', estimated_delivery: '1-2 Hari', sort_order: 2 },
+  { id: 3, province: 'Banten', cost: '10000', formatted_cost: 'Rp 10.000', estimated_delivery: '1-2 Hari', sort_order: 3 },
+  { id: 4, province: 'Jawa Tengah', cost: '15000', formatted_cost: 'Rp 15.000', estimated_delivery: '2-3 Hari', sort_order: 4 },
+  { id: 5, province: 'D.I. Yogyakarta', cost: '15000', formatted_cost: 'Rp 15.000', estimated_delivery: '2-3 Hari', sort_order: 5 },
+  { id: 6, province: 'Jawa Timur', cost: '15000', formatted_cost: 'Rp 15.000', estimated_delivery: '2-3 Hari', sort_order: 6 },
+  { id: 7, province: 'Bali', cost: '20000', formatted_cost: 'Rp 20.000', estimated_delivery: '2-3 Hari', sort_order: 7 },
+  { id: 8, province: 'Nusa Tenggara Barat (NTB)', cost: '25000', formatted_cost: 'Rp 25.000', estimated_delivery: '3-4 Hari', sort_order: 8 },
+  { id: 9, province: 'Nusa Tenggara Timur (NTT)', cost: '30000', formatted_cost: 'Rp 30.000', estimated_delivery: '3-5 Hari', sort_order: 9 },
+  { id: 10, province: 'Lampung', cost: '20000', formatted_cost: 'Rp 20.000', estimated_delivery: '2-3 Hari', sort_order: 10 },
+  { id: 11, province: 'Sumatera Selatan', cost: '22000', formatted_cost: 'Rp 22.000', estimated_delivery: '2-3 Hari', sort_order: 11 },
+  { id: 12, province: 'Sumatera Barat', cost: '25000', formatted_cost: 'Rp 25.000', estimated_delivery: '3-4 Hari', sort_order: 12 },
+  { id: 13, province: 'Riau & Kep. Riau', cost: '25000', formatted_cost: 'Rp 25.000', estimated_delivery: '3-4 Hari', sort_order: 13 },
+  { id: 14, province: 'Jambi & Bengkulu', cost: '25000', formatted_cost: 'Rp 25.000', estimated_delivery: '2-3 Hari', sort_order: 14 },
+  { id: 15, province: 'Sumatera Utara', cost: '28000', formatted_cost: 'Rp 28.000', estimated_delivery: '3-4 Hari', sort_order: 15 },
+  { id: 16, province: 'Aceh', cost: '32000', formatted_cost: 'Rp 32.000', estimated_delivery: '3-5 Hari', sort_order: 16 },
+  { id: 17, province: 'Kalimantan Barat & Selatan', cost: '30000', formatted_cost: 'Rp 30.000', estimated_delivery: '3-4 Hari', sort_order: 17 },
+  { id: 18, province: 'Kalimantan Tengah & Timur', cost: '32000', formatted_cost: 'Rp 32.000', estimated_delivery: '3-5 Hari', sort_order: 18 },
+  { id: 19, province: 'Kalimantan Utara', cost: '38000', formatted_cost: 'Rp 38.000', estimated_delivery: '4-6 Hari', sort_order: 19 },
+  { id: 20, province: 'Sulawesi Selatan', cost: '28000', formatted_cost: 'Rp 28.000', estimated_delivery: '3-4 Hari', sort_order: 20 },
+  { id: 21, province: 'Sulawesi Lainnya', cost: '35000', formatted_cost: 'Rp 35.000', estimated_delivery: '3-5 Hari', sort_order: 21 },
+  { id: 22, province: 'Maluku & Papua', cost: '50000', formatted_cost: 'Rp 50.000', estimated_delivery: '4-7 Hari', sort_order: 22 },
+];
+
 export default function KeranjangPage() {
   const { items, removeFromCart, updateQuantity, clearCart, totalItems, subtotal } = useCart();
 
-  const [shippingRates, setShippingRates] = useState<ShippingRate[]>([]);
-  const [selectedProvince, setSelectedProvince] = useState<string>('');
+  const [shippingRates, setShippingRates] = useState<ShippingRate[]>(DEFAULT_SHIPPING_RATES);
+  const [selectedProvince, setSelectedProvince] = useState<string>('DKI Jakarta');
   const [customerName, setCustomerName] = useState<string>('');
   const [customerPhone, setCustomerPhone] = useState<string>('');
   const [shippingCity, setShippingCity] = useState<string>('');
@@ -20,20 +45,23 @@ export default function KeranjangPage() {
   const [shippingAddress, setShippingAddress] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
 
-  const [isLoadingRates, setIsLoadingRates] = useState<boolean>(true);
+  const [isLoadingRates, setIsLoadingRates] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [orderSuccess, setOrderSuccess] = useState<CheckoutResponse | null>(null);
 
-  // Load active shipping rates
+  // Load active shipping rates from server and update list
   useEffect(() => {
     async function loadRates() {
+      setIsLoadingRates(true);
       try {
         const rates = await getShippingRates();
-        setShippingRates(rates);
-        if (rates.length > 0) {
-          // Default to first rate
-          setSelectedProvince(rates[0].province);
+        if (rates && rates.length > 0) {
+          setShippingRates(rates);
+          setSelectedProvince((prev) => {
+            const match = rates.some((r) => r.province === prev);
+            return match ? prev : rates[0].province;
+          });
         }
       } catch (err) {
         console.error('Failed to load shipping rates:', err);
@@ -44,9 +72,6 @@ export default function KeranjangPage() {
     loadRates();
   }, []);
 
-  const currentRate = shippingRates.find((r) => r.province === selectedProvince) || shippingRates[0];
-  const shippingCost = currentRate ? parseFloat(currentRate.cost) : 15000;
-  const grandTotal = subtotal + (items.length > 0 ? shippingCost : 0);
 
   const handleSubmitCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -120,7 +145,7 @@ export default function KeranjangPage() {
 
       <main className="flex-1 max-w-screen-xl mx-auto px-4 md:px-10 pt-24 pb-20 w-full">
         {/* Header Breadcrumb */}
-        <div className="mb-6 flex items-center justify-between">
+        <div className="mb-6 flex items-center justify-between gap-3">
           <div>
             <p className="text-xs font-semibold tracking-widest uppercase text-stone-400 mb-1">
               Checkout Pesanan
@@ -131,7 +156,7 @@ export default function KeranjangPage() {
           </div>
           <Link
             href="/"
-            className="text-xs font-medium text-stone-600 hover:text-zinc-900 flex items-center gap-1.5 transition-colors"
+            className="shrink-0 whitespace-nowrap text-xs font-medium text-stone-600 hover:text-zinc-900 flex items-center gap-1.5 transition-colors"
           >
             <span>←</span>
             <span>Lanjut Belanja</span>
@@ -142,7 +167,7 @@ export default function KeranjangPage() {
             SUCCESS SCREEN MODAL / VIEW
             ───────────────────────────────────────── */}
         {orderSuccess ? (
-          <div className="max-w-xl mx-auto bg-white border border-stone-200/80 rounded-2xl p-8 shadow-sm text-center space-y-6 animate-scale-in my-8">
+          <div className="max-w-xl mx-auto bg-white border border-stone-200/80 rounded-2xl p-5 sm:p-8 shadow-sm text-center space-y-6 animate-scale-in my-4 sm:my-8">
             <div className="w-16 h-16 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center mx-auto text-3xl">
               ✓
             </div>
@@ -163,20 +188,20 @@ export default function KeranjangPage() {
               <div className="flex justify-between text-stone-600">
                 <span>Subtotal Pakaian:</span>
                 <span className="font-semibold text-zinc-900">
-                  Rp {orderSuccess.subtotal_items.toLocaleString('id-ID')}
+                  Rp {Number(orderSuccess.subtotal_items || 0).toLocaleString('id-ID')}
                 </span>
               </div>
               <div className="flex justify-between text-stone-600">
-                <span>Ongkos Kirim:</span>
+                <span>Daerah Tujuan:</span>
                 <span className="font-semibold text-zinc-900">
-                  Rp {orderSuccess.shipping_cost.toLocaleString('id-ID')}
+                  {orderSuccess.shipping_province || selectedProvince}
                 </span>
               </div>
               <div className="divider my-2" />
               <div className="flex justify-between text-sm font-bold text-zinc-900">
-                <span>Total Tagihan:</span>
+                <span>Total Pakaian:</span>
                 <span className="text-emerald-700">
-                  Rp {orderSuccess.total_amount.toLocaleString('id-ID')}
+                  Rp {Number(orderSuccess.subtotal_items || 0).toLocaleString('id-ID')}
                 </span>
               </div>
             </div>
@@ -219,7 +244,7 @@ export default function KeranjangPage() {
                 LEFT: Cart Items (lg:col-span-7)
                 ───────────────────────────────────────── */}
             <div className="lg:col-span-7 space-y-4">
-              <div className="bg-white border border-stone-200/80 rounded-2xl p-6 shadow-sm space-y-4">
+              <div className="bg-white border border-stone-200/80 rounded-2xl p-4 sm:p-6 shadow-sm space-y-4">
                 <div className="flex items-center justify-between pb-3 border-b border-stone-100">
                   <h2 className="text-base font-semibold text-zinc-900 flex items-center gap-2">
                     <span>🛍️</span>
@@ -254,7 +279,7 @@ export default function KeranjangPage() {
                 ) : (
                   <div className="divide-y divide-stone-100">
                     {items.map((item) => (
-                      <div key={item.variantId} className="py-4 flex gap-4 items-center">
+                      <div key={item.variantId} className="py-4 flex flex-wrap sm:flex-nowrap gap-x-3 sm:gap-x-4 gap-y-3 items-center">
                         {/* Thumbnail */}
                         <div
                           className="relative w-16 h-20 bg-stone-100 rounded-lg overflow-hidden shrink-0 border border-stone-200"
@@ -298,12 +323,12 @@ export default function KeranjangPage() {
                         </div>
 
                         {/* Quantity Controller */}
-                        <div className="flex flex-col items-end gap-2 shrink-0">
+                        <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto gap-2 shrink-0">
                           <div className="flex items-center border border-stone-200 rounded-lg bg-stone-50/50 overflow-hidden">
                             <button
                               type="button"
                               onClick={() => updateQuantity(item.variantId, item.quantity - 1)}
-                              className="w-7 h-7 flex items-center justify-center text-stone-600 hover:bg-stone-200 text-xs transition-colors"
+                              className="w-8 h-8 sm:w-7 sm:h-7 flex items-center justify-center text-stone-600 hover:bg-stone-200 text-xs transition-colors"
                               aria-label="Kurangi"
                             >
                               -
@@ -315,7 +340,7 @@ export default function KeranjangPage() {
                               type="button"
                               onClick={() => updateQuantity(item.variantId, item.quantity + 1)}
                               disabled={item.quantity >= item.maxStock}
-                              className={`w-7 h-7 flex items-center justify-center text-xs transition-colors ${
+                              className={`w-8 h-8 sm:w-7 sm:h-7 flex items-center justify-center text-xs transition-colors ${
                                 item.quantity >= item.maxStock
                                   ? 'text-stone-300 cursor-not-allowed'
                                   : 'text-stone-600 hover:bg-stone-200'
@@ -349,10 +374,10 @@ export default function KeranjangPage() {
             {/* ─────────────────────────────────────────
                 RIGHT: Shipping Form & WhatsApp Checkout (lg:col-span-5)
                 ───────────────────────────────────────── */}
-            <div className="lg:col-span-5 space-y-4 lg:sticky lg:top-24">
+            <div className="lg:col-span-5 space-y-4 lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto lg:overscroll-contain scrollbar-hide">
               <form
                 onSubmit={handleSubmitCheckout}
-                className="bg-white border border-stone-200/80 rounded-2xl p-6 shadow-sm space-y-4"
+                className="bg-white border border-stone-200/80 rounded-2xl p-4 sm:p-6 shadow-sm space-y-4"
               >
                 <h2 className="text-base font-semibold text-zinc-900 flex items-center gap-2 pb-2 border-b border-stone-100">
                   <span>📍</span>
@@ -396,35 +421,27 @@ export default function KeranjangPage() {
                     />
                   </div>
 
-                  {/* Provinsi (Ongkir otomatis) */}
+                  {/* Provinsi Tujuan */}
                   <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="font-semibold text-zinc-700">
-                        Provinsi Tujuan <span className="text-rose-500">*</span>
-                      </label>
-                      {currentRate && (
-                        <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
-                          Ongkir: Rp {parseFloat(currentRate.cost).toLocaleString('id-ID')}
-                        </span>
-                      )}
-                    </div>
+                    <label className="block font-semibold text-zinc-700 mb-1">
+                      Provinsi Tujuan <span className="text-rose-500">*</span>
+                    </label>
 
                     <select
                       value={selectedProvince}
                       onChange={(e) => setSelectedProvince(e.target.value)}
-                      disabled={isLoadingRates}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-zinc-900 text-xs bg-white"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-zinc-900 text-xs bg-white text-zinc-900 font-medium cursor-pointer"
                     >
                       {shippingRates.map((r) => (
-                        <option key={r.id} value={r.province}>
-                          {r.province} — Rp {parseFloat(r.cost).toLocaleString('id-ID')} ({r.estimated_delivery})
+                        <option key={r.id || r.province} value={r.province}>
+                          {r.province}
                         </option>
                       ))}
                     </select>
                   </div>
 
                   {/* Kota & Kecamatan */}
-                  <div className="grid grid-cols-2 gap-2.5">
+                  <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-2.5">
                     <div>
                       <label className="block font-semibold text-zinc-700 mb-1">
                         Kota / Kabupaten <span className="text-rose-500">*</span>
@@ -482,7 +499,7 @@ export default function KeranjangPage() {
                   </div>
                 </div>
 
-                {/* Ringkasan Biaya */}
+                {/* Ringkasan Belanja */}
                 <div className="pt-3 border-t border-stone-100 space-y-2 text-xs">
                   <div className="flex justify-between text-stone-600">
                     <span>Subtotal Pakaian:</span>
@@ -492,18 +509,18 @@ export default function KeranjangPage() {
                   </div>
 
                   <div className="flex justify-between text-stone-600">
-                    <span>Ongkos Kirim ({selectedProvince || 'Pilih Daerah'}):</span>
+                    <span>Daerah Tujuan:</span>
                     <span className="font-semibold text-zinc-900">
-                      {items.length === 0 ? 'Rp 0' : `Rp ${shippingCost.toLocaleString('id-ID')}`}
+                      {selectedProvince || 'Belum dipilih'}
                     </span>
                   </div>
 
                   <div className="divider my-1" />
 
                   <div className="flex justify-between text-base font-bold text-zinc-900 pt-1">
-                    <span>Total Tagihan:</span>
+                    <span>Total Belanja:</span>
                     <span className="text-emerald-700">
-                      Rp {grandTotal.toLocaleString('id-ID')}
+                      Rp {subtotal.toLocaleString('id-ID')}
                     </span>
                   </div>
                 </div>

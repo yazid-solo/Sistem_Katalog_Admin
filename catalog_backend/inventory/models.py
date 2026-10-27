@@ -8,6 +8,7 @@ Model hierarchy:
           └── Variant       (size + color + stock_quantity)
 """
 from django.db import models
+from django.db.models import F
 from django.utils.text import slugify
 
 
@@ -78,11 +79,13 @@ class Product(models.Model):
     base_price = models.DecimalField(
         max_digits=12,
         decimal_places=2,
+        db_index=True,
         verbose_name="Harga Dasar (Rp)",
         help_text="Harga dalam Rupiah, tanpa titik/koma pemisah ribuan"
     )
     is_active = models.BooleanField(
         default=True,
+        db_index=True,
         verbose_name="Aktif / Ditampilkan",
         help_text="Hilangkan centang untuk menyembunyikan produk dari katalog"
     )
@@ -97,13 +100,16 @@ class Product(models.Model):
         verbose_name="Catatan Panduan Ukuran Khusus",
         help_text="Catatan tambahan ukuran baju, misal: 'Tinggi model 168 cm, BB 52 kg, mengenakan size S'"
     )
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Dibuat")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name="Dibuat")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Diperbarui")
 
     class Meta:
         verbose_name = "Produk"
         verbose_name_plural = "Produk"
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['is_active', '-created_at']),
+        ]
 
     def save(self, *args, **kwargs):
         if not self.slug:
@@ -121,12 +127,14 @@ class Product(models.Model):
 
     @property
     def primary_image(self):
-        """Returns the primary image URL, or the first image, or None."""
-        primary = self.images.filter(is_primary=True).first()
+        """Returns the primary image URL using prefetched cache to avoid N+1 queries."""
+        all_imgs = list(self.images.all())
+        if not all_imgs:
+            return None
+        primary = next((img for img in all_imgs if img.is_primary), None)
         if primary:
             return primary.effective_image_url
-        first = self.images.first()
-        return first.effective_image_url if first else None
+        return all_imgs[0].effective_image_url
 
     @property
     def total_stock(self):
@@ -260,10 +268,12 @@ class Variant(models.Model):
     size = models.CharField(
         max_length=20,
         choices=SIZE_CHOICES,
+        db_index=True,
         verbose_name="Ukuran"
     )
     color = models.CharField(
         max_length=100,
+        db_index=True,
         verbose_name="Warna",
         help_text="Nama warna, misal: Putih Susu, Navy, Sage Green"
     )
@@ -277,6 +287,7 @@ class Variant(models.Model):
     )
     stock_quantity = models.PositiveIntegerField(
         default=0,
+        db_index=True,
         verbose_name="Jumlah Stok",
         help_text="0 = Habis, akan ditampilkan sebagai tombol dicoret di frontend"
     )
@@ -319,6 +330,9 @@ class Variant(models.Model):
         # Each product can only have one variant per size+color combo
         unique_together = [['product', 'size', 'color']]
         ordering = ['color', 'size']
+        indexes = [
+            models.Index(fields=['product', 'stock_quantity']),
+        ]
 
     def save(self, *args, **kwargs):
         # Auto-generate SKU if not provided
@@ -402,10 +416,12 @@ class ShippingRate(models.Model):
     )
     is_active = models.BooleanField(
         default=True,
+        db_index=True,
         verbose_name="Aktif Ditampilkan"
     )
     sort_order = models.PositiveIntegerField(
         default=0,
+        db_index=True,
         verbose_name="Urutan Tampil"
     )
 
@@ -447,6 +463,7 @@ class Order(models.Model):
     )
     customer_phone = models.CharField(
         max_length=30,
+        db_index=True,
         verbose_name="No. WhatsApp Pembeli"
     )
     shipping_province = models.CharField(
@@ -487,6 +504,7 @@ class Order(models.Model):
         max_length=20,
         choices=STATUS_CHOICES,
         default='PENDING',
+        db_index=True,
         verbose_name="Status Pesanan"
     )
     tracking_number = models.CharField(
@@ -499,13 +517,16 @@ class Order(models.Model):
         blank=True,
         verbose_name="Catatan Pesanan"
     )
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Waktu Pesan")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name="Waktu Pesan")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Terakhir Diperbarui")
 
     class Meta:
         verbose_name = "Pesanan"
         verbose_name_plural = "Pesanan"
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', '-created_at']),
+        ]
 
     def __str__(self):
         return f"{self.order_number} — {self.customer_name} (Rp {self.total_amount:,.0f})"
@@ -513,12 +534,13 @@ class Order(models.Model):
     def save(self, *args, **kwargs):
         if self.pk:
             orig = Order.objects.filter(pk=self.pk).first()
-            # If changed to CANCELLED from another status -> restore stock
+            # If changed to CANCELLED from another status -> atomically restore stock
             if orig and orig.status != 'CANCELLED' and self.status == 'CANCELLED':
                 for item in self.items.all():
-                    if item.variant:
-                        item.variant.stock_quantity += item.quantity
-                        item.variant.save(update_fields=['stock_quantity'])
+                    if item.variant_id:
+                        Variant.objects.filter(pk=item.variant_id).update(
+                            stock_quantity=F('stock_quantity') + item.quantity
+                        )
         super().save(*args, **kwargs)
 
 

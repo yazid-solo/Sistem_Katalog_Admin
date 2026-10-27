@@ -13,7 +13,7 @@ import type {
 
 const API_BASE = typeof window === 'undefined'
   ? (process.env.INTERNAL_API_URL || 'http://backend:8000')
-  : (process.env.NEXT_PUBLIC_API_URL || '');
+  : '';
 
 async function apiFetch<T>(path: string): Promise<T> {
   const url = `${API_BASE}${path}`;
@@ -27,13 +27,25 @@ async function apiFetch<T>(path: string): Promise<T> {
 
     if (!res.ok) {
       console.error(`API Error ${res.status}: ${url}`);
-      return (path.includes('categories') ? [] : { count: 0, next: null, previous: null, results: [] }) as unknown as T;
+      if (path.includes('shipping-rates') || path.includes('categories')) {
+        return [] as unknown as T;
+      }
+      if (path.startsWith('/api/products/') && path !== '/api/products/' && !path.includes('?')) {
+        throw new Error(`Item not found: ${path}`);
+      }
+      return { count: 0, next: null, previous: null, results: [] } as unknown as T;
     }
 
     return res.json();
   } catch (err) {
     console.error(`Fetch failed for ${url}:`, err);
-    return (path.includes('categories') ? [] : { count: 0, next: null, previous: null, results: [] }) as unknown as T;
+    if (path.includes('shipping-rates') || path.includes('categories')) {
+      return [] as unknown as T;
+    }
+    if (path.startsWith('/api/products/') && path !== '/api/products/' && !path.includes('?')) {
+      throw err;
+    }
+    return { count: 0, next: null, previous: null, results: [] } as unknown as T;
   }
 }
 
@@ -77,7 +89,7 @@ export function generateWhatsAppLink(
   selectedColor?: string,
   phoneNumber?: string
 ): string {
-  const rawNumber = phoneNumber || process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || '6283835782010';
+  const rawNumber = phoneNumber || process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || '';
   const number = rawNumber.replace(/[^0-9]/g, '');
 
   const lines = [
@@ -103,7 +115,7 @@ export async function getShippingRates(): Promise<ShippingRate[]> {
 }
 
 export async function submitCheckout(payload: CheckoutPayload): Promise<CheckoutResponse> {
-  const url = `${typeof window === 'undefined' ? (process.env.INTERNAL_API_URL || 'http://backend:8000') : (process.env.NEXT_PUBLIC_API_URL || '')}/api/orders/checkout/`;
+  const url = `${API_BASE}/api/orders/checkout/`;
   const res = await fetch(url, {
     method: 'POST',
     headers: {

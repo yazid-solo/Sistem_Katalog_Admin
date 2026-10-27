@@ -49,6 +49,9 @@ export default async function ProductDetailPage({ params }: PageProps) {
   let product;
   try {
     product = await getProductDetail(params.slug);
+    if (!product || !product.id || !product.slug) {
+      notFound();
+    }
   } catch {
     notFound();
   }
@@ -57,24 +60,8 @@ export default async function ProductDetailPage({ params }: PageProps) {
     <>
       <Navbar />
 
-      <main className="min-h-screen pt-16 pb-32 md:pb-16 bg-[#FAF9F6]/40">
+      <main className="min-h-screen pt-20 pb-32 md:pb-16 bg-[#FAF9F6]/40">
         <div className="max-w-screen-xl mx-auto px-6 md:px-10">
-
-          {/* ── Breadcrumb ── */}
-          <nav aria-label="breadcrumb" className="flex items-center gap-2 py-6 text-xs text-stone-400">
-            <Link href="/" className="hover:text-zinc-900 transition-colors">Koleksi</Link>
-            <span>/</span>
-            {product.category && (
-              <>
-                <Link href={`/?category=${product.category.slug}`} className="hover:text-zinc-900 transition-colors capitalize">
-                  {product.category.name}
-                </Link>
-                <span>/</span>
-              </>
-            )}
-            <span className="text-zinc-700 font-medium truncate max-w-[200px]">{product.title}</span>
-          </nav>
-
           {/* ── Main Interactive Marketplace View ── */}
           <ProductDetailClient product={product} />
         </div>

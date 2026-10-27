@@ -1,6 +1,8 @@
-/** @type {import('next').NextConfig} */
+const backendUrl = process.env.INTERNAL_API_URL || 'http://backend:8000';
+
 const nextConfig = {
   output: 'standalone',
+  skipTrailingSlashRedirect: true,
   images: {
     remotePatterns: [
       {
@@ -23,6 +25,10 @@ const nextConfig = {
         protocol: 'http',
         hostname: '127.0.0.1',
       },
+      {
+        protocol: 'http',
+        hostname: 'backend',
+      },
     ],
   },
   async rewrites() {
@@ -30,11 +36,41 @@ const nextConfig = {
       // Proxy API calls to avoid CORS in browser
       {
         source: '/api/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/:path*`,
+        destination: `${backendUrl}/api/:path*`,
       },
       {
         source: '/media/:path*',
-        destination: `${process.env.INTERNAL_API_URL || 'http://backend:8000'}/media/:path*`,
+        destination: `${backendUrl}/media/:path*`,
+      },
+    ];
+  },
+  async headers() {
+    return [
+      {
+        source: '/admin-toko/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+          },
+          {
+            key: 'Pragma',
+            value: 'no-cache',
+          },
+        ],
+      },
+      {
+        source: '/admin-toko',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+          },
+          {
+            key: 'Pragma',
+            value: 'no-cache',
+          },
+        ],
       },
     ];
   },

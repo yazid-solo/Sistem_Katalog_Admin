@@ -45,6 +45,7 @@ module.exports = {
         'pulse-soft': 'pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         'fade-in': 'fade-in 0.3s ease-in-out',
         'slide-up': 'slide-up 0.3s ease-out',
+        'scale-in': 'scale-in 0.2s ease-out',
       },
       keyframes: {
         'pulse-soft': {
@@ -58,6 +59,10 @@ module.exports = {
         'slide-up': {
           from: { transform: 'translateY(100%)' },
           to: { transform: 'translateY(0)' },
+        },
+        'scale-in': {
+          from: { transform: 'scale(0.6)', opacity: '0' },
+          to: { transform: 'scale(1)', opacity: '1' },
         },
       },
       backdropBlur: {

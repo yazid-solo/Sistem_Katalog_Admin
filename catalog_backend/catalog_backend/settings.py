@@ -72,9 +72,10 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': config('DB_NAME', default='katalog_pakaian'),
         'USER': config('DB_USER', default='katalog_user'),
-        'PASSWORD': config('DB_PASSWORD', default='katalog_secret_2024'),
+        'PASSWORD': config('DB_PASSWORD', default=''),
         'HOST': config('DB_HOST', default='localhost'),
         'PORT': config('DB_PORT', default='5432'),
+        'CONN_MAX_AGE': 60,
     }
 }
 
@@ -124,6 +125,16 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '300/minute',
+        'user': '600/minute',
+        'checkout': '20/minute',
+        'seller_login': '10/minute',
+    },
 }
 
 # ─────────────────────────────────────────
@@ -131,10 +142,12 @@ REST_FRAMEWORK = {
 # ─────────────────────────────────────────
 CORS_ALLOWED_ORIGINS = config(
     'CORS_ALLOWED_ORIGINS',
-    default='http://localhost:3000,http://127.0.0.1:3000'
+    default='http://localhost,http://127.0.0.1,http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000,http://frontend:3000'
 ).split(',')
 
 CORS_ALLOW_CREDENTIALS = True
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
 
 # ─────────────────────────────────────────
 # CSRF TRUSTED ORIGINS — Allow Admin Login via Nginx

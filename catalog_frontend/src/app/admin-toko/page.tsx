@@ -122,9 +122,13 @@ interface ColorVariationInput {
   sizes: { [size: string]: number };
 }
 
+const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+
 export default function AdminTokoPage() {
-  // Authentication
+  // Authentication & Security State
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [sellerToken, setSellerToken] = useState<string>('');
+  const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
   const [passwordInput, setPasswordInput] = useState<string>('');
   const [loginError, setLoginError] = useState<string | null>(null);
 
@@ -230,11 +234,39 @@ export default function AdminTokoPage() {
   const [createSuccessMsg, setCreateSuccessMsg] = useState<string | null>(null);
   const [createErrorMsg, setCreateErrorMsg] = useState<string | null>(null);
 
-  // Check login state on load
+  // Cek sesi saat halaman dibuka:
+  // Jika sama sekali selama 24 jam off / tidak aktif -> Wajibkan login kembali!
   useEffect(() => {
-    const token = localStorage.getItem('seller_token');
-    if (token) {
-      setIsAuthenticated(true);
+    if (typeof window !== 'undefined') {
+      const storedToken = localStorage.getItem('seller_token');
+      const lastActiveStr = localStorage.getItem('seller_last_active');
+      const now = Date.now();
+
+      if (storedToken && lastActiveStr) {
+        const lastActive = parseInt(lastActiveStr, 10);
+        const idleTime = now - lastActive;
+
+        // Jika off selama 24 jam (atau lebih)
+        if (idleTime >= TWENTY_FOUR_HOURS_MS || isNaN(lastActive)) {
+          // Sesi 24 jam kedaluwarsa -> bersihkan dan wajibkan login kembali
+          localStorage.removeItem('seller_token');
+          localStorage.removeItem('seller_last_active');
+          try { sessionStorage.removeItem('seller_token'); } catch (e) {}
+          setSellerToken('');
+          setIsAuthenticated(false);
+          setLoginError('Sesi Anda telah kedaluwarsa (off lebih dari 24 jam). Silakan masukkan kata sandi kembali.');
+        } else {
+          // Masih dalam 24 jam aktif -> perbarui waktu aktif dan izinkan akses
+          localStorage.setItem('seller_last_active', String(now));
+          try { sessionStorage.setItem('seller_token', storedToken); } catch (e) {}
+          setSellerToken(storedToken);
+          setIsAuthenticated(true);
+        }
+      } else {
+        setIsAuthenticated(false);
+        setSellerToken('');
+      }
+      setIsCheckingAuth(false);
     }
   }, []);
 
@@ -253,6 +285,41 @@ export default function AdminTokoPage() {
     }
   }, [isAuthenticated]);
 
+  // Secure Authenticated Fetch Wrapper for Admin / Seller Center
+  const sellerFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const token = sellerToken || (typeof window !== 'undefined' ? localStorage.getItem('seller_token') || '' : '');
+    let headers: Record<string, string> = {};
+    if (init?.headers) {
+      if (init.headers instanceof Headers) {
+        init.headers.forEach((val, key) => { headers[key] = val; });
+      } else if (Array.isArray(init.headers)) {
+        init.headers.forEach(([key, val]) => { headers[key] = val; });
+      } else {
+        headers = { ...(init.headers as Record<string, string>) };
+      }
+    }
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const res = await fetch(input, { ...init, headers });
+    if (res.status === 401 || res.status === 403) {
+      setSellerToken('');
+      setIsAuthenticated(false);
+      try {
+        localStorage.removeItem('seller_token');
+        localStorage.removeItem('seller_last_active');
+        sessionStorage.removeItem('seller_token');
+      } catch (e) {}
+      setLoginError('Sesi login Anda telah berakhir setelah 24 jam. Silakan masukkan kata sandi kembali.');
+    } else if (res.ok) {
+      // Perbarui cap waktu aktivitas terbaru agar terhitung aktif
+      try {
+        localStorage.setItem('seller_last_active', String(Date.now()));
+      } catch (e) {}
+    }
+    return res;
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
@@ -265,23 +332,36 @@ export default function AdminTokoPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || data.detail || 'Kata sandi salah.');
+        throw new Error(data.error || data.detail || 'Kata sandi atau PIN admin salah.');
       }
-      localStorage.setItem('seller_token', data.token);
+      const now = Date.now();
+      // Simpan token dan cap waktu aktivitas aktif 24 jam
+      setSellerToken(data.token);
+      try {
+        localStorage.setItem('seller_token', data.token);
+        localStorage.setItem('seller_last_active', String(now));
+        sessionStorage.setItem('seller_token', data.token);
+      } catch (e) {}
       setIsAuthenticated(true);
+      setPasswordInput('');
     } catch (err: any) {
       setLoginError(err.message);
     }
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('seller_token');
+    setSellerToken('');
     setIsAuthenticated(false);
+    try {
+      localStorage.removeItem('seller_token');
+      localStorage.removeItem('seller_last_active');
+      sessionStorage.removeItem('seller_token');
+    } catch (e) {}
   };
 
   const fetchStats = async () => {
     try {
-      const res = await fetch('/api/seller/stats/');
+      const res = await sellerFetch('/api/seller/stats/');
       if (res.ok) {
         const data = await res.json();
         setStats(data);
@@ -311,7 +391,7 @@ export default function AdminTokoPage() {
       if (orderStatusFilter !== 'ALL') q.set('status', orderStatusFilter);
       if (orderSearch) q.set('search', orderSearch);
 
-      const res = await fetch(`/api/seller/orders/?${q.toString()}`);
+      const res = await sellerFetch(`/api/seller/orders/?${q.toString()}`);
       if (res.ok) {
         const data = await res.json();
         setOrders(data);
@@ -349,7 +429,7 @@ export default function AdminTokoPage() {
 
   const handleUpdateOrderStatus = async (orderNumber: string, status: string, trackingNumber?: string) => {
     try {
-      const res = await fetch(`/api/seller/orders/${orderNumber}/status/`, {
+      const res = await sellerFetch(`/api/seller/orders/${orderNumber}/status/`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status, tracking_number: trackingNumber }),
@@ -387,10 +467,16 @@ export default function AdminTokoPage() {
   const fetchProducts = async () => {
     setIsLoadingProducts(true);
     try {
-      const res = await fetch('/api/seller/products/');
+      const res = await sellerFetch('/api/seller/products/');
       if (res.ok) {
         const data = await res.json();
-        setProducts(data.results || data);
+        // Backend returns plain array (pagination_class = None), but guard for safety
+        const productList: ProductAdminItem[] = Array.isArray(data)
+          ? data
+          : Array.isArray(data.results)
+          ? data.results
+          : [];
+        setProducts(productList);
       }
     } catch (err) {
       console.error(err);
@@ -402,7 +488,7 @@ export default function AdminTokoPage() {
   const handleUpdateStock = async (variantId: number, newStock: number) => {
     setStockUpdatingId(variantId);
     try {
-      const res = await fetch(`/api/seller/variants/${variantId}/stock/`, {
+      const res = await sellerFetch(`/api/seller/variants/${variantId}/stock/`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stock_quantity: newStock }),
@@ -422,7 +508,7 @@ export default function AdminTokoPage() {
   const fetchLowStockAlerts = async () => {
     setIsLoadingAlerts(true);
     try {
-      const res = await fetch('/api/seller/alerts/low-stock/');
+      const res = await sellerFetch('/api/seller/alerts/low-stock/');
       if (res.ok) {
         const data = await res.json();
         setLowStockAlerts(data.alerts || []);
@@ -437,7 +523,7 @@ export default function AdminTokoPage() {
   const handleToggleProductStatus = async (p: ProductAdminItem) => {
     try {
       const newStatus = !p.is_active;
-      const res = await fetch(`/api/seller/products/${p.id}/update/`, {
+      const res = await sellerFetch(`/api/seller/products/${p.id}/update/`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_active: newStatus }),
@@ -461,7 +547,7 @@ export default function AdminTokoPage() {
     setIsPerformingBulkAction(true);
     setBulkActionMsg(null);
     try {
-      const res = await fetch('/api/seller/products/bulk-action/', {
+      const res = await sellerFetch('/api/seller/products/bulk-action/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, ids: selectedProductIds }),
@@ -484,7 +570,7 @@ export default function AdminTokoPage() {
   const handleDeleteSingleProduct = async (p: ProductAdminItem) => {
     if (!confirm(`Apakah Anda yakin ingin menghapus produk "${p.title}"?`)) return;
     try {
-      const res = await fetch('/api/seller/products/bulk-action/', {
+      const res = await sellerFetch('/api/seller/products/bulk-action/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'delete', ids: [p.id] }),
@@ -517,7 +603,7 @@ export default function AdminTokoPage() {
     setEditSuccessMsg(null);
     setEditErrorMsg(null);
     try {
-      const res = await fetch(`/api/seller/products/${editingProduct.id}/update/`, {
+      const res = await sellerFetch(`/api/seller/products/${editingProduct.id}/update/`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -547,7 +633,7 @@ export default function AdminTokoPage() {
     setAlertRestockingKey(String(variantId));
     try {
       const newStock = Math.max(0, currentStock + addQty);
-      const res = await fetch(`/api/seller/variants/${variantId}/stock/`, {
+      const res = await sellerFetch(`/api/seller/variants/${variantId}/stock/`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stock_quantity: newStock }),
@@ -628,7 +714,7 @@ export default function AdminTokoPage() {
         formData.append('image_url', url);
       }
 
-      const res = await fetch(`/api/seller/products/${productId}/color-image/`, {
+      const res = await sellerFetch(`/api/seller/products/${productId}/color-image/`, {
         method: 'POST',
         body: formData,
       });
@@ -643,9 +729,14 @@ export default function AdminTokoPage() {
       setColorModalUrl((prev) => ({ ...prev, [color]: '' }));
 
       // Refresh products list and active modal data
-      const refreshRes = await fetch('/api/seller/products/');
+      const refreshRes = await sellerFetch('/api/seller/products/');
       if (refreshRes.ok) {
-        const updatedList: ProductAdminItem[] = await refreshRes.json();
+        const refreshData = await refreshRes.json();
+        const updatedList: ProductAdminItem[] = Array.isArray(refreshData)
+          ? refreshData
+          : Array.isArray(refreshData.results)
+          ? refreshData.results
+          : [];
         setProducts(updatedList);
         const currentUpdated = updatedList.find((p) => p.id === productId);
         if (currentUpdated) {
@@ -662,11 +753,11 @@ export default function AdminTokoPage() {
   const handleDeleteProductImage = async (productId: number, imageId: number) => {
     if (!confirm('Hapus foto ini?')) return;
     try {
-      const res = await fetch(`/api/seller/products/${productId}/images/${imageId}/`, {
+      const res = await sellerFetch(`/api/seller/products/${productId}/images/${imageId}/`, {
         method: 'DELETE',
       });
       if (res.ok) {
-        const refreshRes = await fetch('/api/seller/products/');
+        const refreshRes = await sellerFetch('/api/seller/products/');
         if (refreshRes.ok) {
           const updatedList: ProductAdminItem[] = await refreshRes.json();
           setProducts(updatedList);
@@ -709,7 +800,7 @@ export default function AdminTokoPage() {
         )
       );
 
-      const res = await fetch(`/api/seller/products/${productId}/color-image/`, {
+      const res = await sellerFetch(`/api/seller/products/${productId}/color-image/`, {
         method: 'POST',
         body: formData,
       });
@@ -725,9 +816,14 @@ export default function AdminTokoPage() {
       setNewCustomColorPreview('');
       setNewCustomColorSizes({ S: 5, M: 10, L: 10, XL: 5 });
 
-      const refreshRes = await fetch('/api/seller/products/');
+      const refreshRes = await sellerFetch('/api/seller/products/');
       if (refreshRes.ok) {
-        const updatedList: ProductAdminItem[] = await refreshRes.json();
+        const refreshData2 = await refreshRes.json();
+        const updatedList: ProductAdminItem[] = Array.isArray(refreshData2)
+          ? refreshData2
+          : Array.isArray(refreshData2.results)
+          ? refreshData2.results
+          : [];
         setProducts(updatedList);
         const currentUpdated = updatedList.find((p) => p.id === productId);
         if (currentUpdated) {
@@ -759,16 +855,21 @@ export default function AdminTokoPage() {
   };
 
   const handleUpdateShippingRate = async (id: number) => {
-    const cost = editingRates[id];
+    const cost = editingRates[id] ?? shippingRates.find((r) => r.id === id)?.cost;
+    if (cost === undefined) return;
     try {
-      const res = await fetch(`/api/seller/shipping-rates/${id}/`, {
+      const res = await sellerFetch(`/api/seller/shipping-rates/${id}/`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cost }),
       });
       if (res.ok) {
         fetchShippingRates();
-        alert('Tarif ongkir berhasil diperbarui!');
+        setOrderFeedback({
+          type: 'success',
+          text: 'Tarif ongkos kirim berhasil diperbarui!',
+        });
+        setTimeout(() => setOrderFeedback(null), 3500);
       }
     } catch (err) {
       console.error(err);
@@ -804,7 +905,7 @@ export default function AdminTokoPage() {
 
       formData.append('colors_data', JSON.stringify(colorsData));
 
-      const res = await fetch('/api/seller/products/create/', {
+      const res = await sellerFetch('/api/seller/products/create/', {
         method: 'POST',
         body: formData,
       });
@@ -846,59 +947,100 @@ export default function AdminTokoPage() {
   };
 
   // ─────────────────────────────────────────
-  // LOGIN SCREEN
+  // CHECKING AUTH STATE
+  // ─────────────────────────────────────────
+  if (isCheckingAuth) {
+    return (
+      <div className="min-h-screen bg-stone-100 flex items-center justify-center p-4">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-[3px] border-zinc-900 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-xs font-semibold text-stone-500">Memeriksa izin akses admin...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ─────────────────────────────────────────
+  // GERBANG KEAMANAN / LOGIN SCREEN (AKSES TERKUNCI)
   // ─────────────────────────────────────────
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-stone-100 flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl border border-stone-200/80 p-8 space-y-6">
-          <div className="text-center space-y-2">
-            <span className="text-[10px] font-bold tracking-[0.25em] text-stone-400 uppercase">
-              SELLER CENTER
-            </span>
-            <h1 className="text-2xl font-bold text-zinc-900 tracking-tight">
-              Dashboard Admin Toko
+      <div className="min-h-screen bg-gradient-to-b from-stone-100 via-stone-100 to-stone-200 flex items-center justify-center p-4 sm:p-6">
+        <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl border border-stone-200/90 p-6 sm:p-10 space-y-6 sm:space-y-7 relative overflow-hidden">
+          {/* Top security accent line */}
+          <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-zinc-800 via-zinc-950 to-zinc-800" />
+
+          {/* Header & Lock Icon */}
+          <div className="text-center space-y-3">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-zinc-900 text-white shadow-lg mx-auto mb-1">
+              <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            </div>
+            
+            <div className="inline-block px-3 py-1 bg-stone-100 border border-stone-200 rounded-full">
+              <span className="text-[10px] font-bold tracking-[0.2em] text-stone-600 uppercase">
+                🔒 AREA TERPROTEKSI • ADMIN TOKO
+              </span>
+            </div>
+
+            <h1 className="text-2xl font-black text-zinc-900 tracking-tight">
+              Autentikasi Pemilik Toko
             </h1>
-            <p className="text-xs text-stone-500">
-              Kelola pesanan WhatsApp, stok pakaian, dan ongkir dengan mudah.
+            <p className="text-xs text-stone-500 leading-relaxed max-w-xs mx-auto">
+              Dashboard toko saat ini <strong className="text-zinc-700">terkunci</strong>. Masukkan Kata Sandi atau PIN Admin Anda untuk membuka data pesanan, omset, dan stok.
+            </p>
+          </div>
+
+          {/* Security Notice Box */}
+          <div className="p-3.5 bg-amber-50/80 border border-amber-200/80 rounded-2xl flex items-start gap-2.5 text-left">
+            <span className="text-base leading-none">🛡️</span>
+            <p className="text-[11px] text-amber-900/90 leading-tight">
+              Sesi login Anda berlaku selama <strong>24 jam</strong>. Jika sama sekali tidak ada aktivitas/off selama 24 jam, sistem akan mengunci kembali demi keamanan data toko.
             </p>
           </div>
 
           {loginError && (
-            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-xl font-medium">
-              {loginError}
+            <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-2xl font-semibold flex items-center gap-2">
+              <span>⚠️</span>
+              <span>{loginError}</span>
             </div>
           )}
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-zinc-700 mb-1">
+              <label className="block text-xs font-bold text-zinc-700 mb-1.5">
                 Kata Sandi / PIN Admin
               </label>
-              <input
-                type="password"
-                required
-                placeholder="Masukkan kata sandi (default: admin123)"
-                value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-zinc-900 text-sm"
-              />
+              <div className="relative">
+                <input
+                  type="password"
+                  required
+                  autoFocus
+                  placeholder="Masukkan kata sandi atau PIN admin..."
+                  value={passwordInput}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                  className="w-full px-4 py-3.5 rounded-2xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:border-zinc-900 text-sm transition-all shadow-2xs font-medium"
+                />
+              </div>
             </div>
 
             <button
               type="submit"
-              className="w-full py-3.5 bg-zinc-900 hover:bg-zinc-800 text-white font-semibold rounded-xl text-sm transition-all shadow-sm"
+              className="w-full py-4 bg-zinc-900 hover:bg-zinc-800 text-white font-bold rounded-2xl text-sm transition-all shadow-md hover:shadow-lg active:scale-[0.99] cursor-pointer flex items-center justify-center gap-2"
             >
-              Masuk ke Dashboard Toko →
+              <span>Buka Kunci & Masuk Dashboard</span>
+              <span>→</span>
             </button>
           </form>
 
-          <div className="text-center pt-2">
+          <div className="text-center pt-1 border-t border-stone-100">
             <Link
               href="/"
-              className="text-xs text-stone-500 hover:text-zinc-900 transition-colors"
+              className="inline-flex items-center gap-1.5 text-xs text-stone-500 hover:text-zinc-900 font-medium transition-colors"
             >
-              ← Kembali ke Website Toko
+              <span>←</span>
+              <span>Kembali ke Katalog Pakaian</span>
             </Link>
           </div>
         </div>
@@ -964,18 +1106,24 @@ export default function AdminTokoPage() {
       <header className="bg-white border-b border-stone-200 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Link href="/admin-toko" className="flex items-center gap-2">
-              <span className="w-8 h-8 rounded-lg bg-zinc-900 text-white flex items-center justify-center font-bold text-sm">
-                K
-              </span>
-              <div>
+            <Link href="/admin-toko" className="flex items-center gap-2.5">
+              <div className="relative h-7 sm:h-8 w-auto flex-shrink-0">
+                <Image
+                  src="/DLRS_Logo.svg"
+                  alt="DLRS Logo"
+                  width={90}
+                  height={36}
+                  className="h-7 sm:h-8 w-auto object-contain"
+                />
+              </div>
+              <div className="border-l border-stone-200 pl-2.5">
                 <p className="text-xs font-bold text-zinc-900 leading-tight">SELLER CENTER</p>
-                <p className="text-[10px] text-stone-400 font-medium">Katalog Pakaian Premium</p>
+                <p className="hidden sm:block text-[10px] text-stone-400 font-medium">Katalog Pakaian</p>
               </div>
             </Link>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             {/* Realtime Live Sync Status */}
             <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200/80 rounded-full text-[11px] font-semibold text-emerald-800 shadow-2xs">
               <span className="relative flex h-2 w-2">
@@ -988,6 +1136,12 @@ export default function AdminTokoPage() {
                   {lastSyncTime}
                 </span>
               )}
+            </div>
+
+            {/* 24-Hour Active Session Badge */}
+            <div className="hidden xl:flex items-center gap-1.5 px-3 py-1.5 bg-stone-50 border border-stone-200/90 rounded-full text-[11px] font-semibold text-stone-700 shadow-2xs" title="Sesi aktif selama 24 jam. Jika off selama 24 jam, sistem akan mengunci kembali.">
+              <span className="text-xs">🕒</span>
+              <span>Sesi 24 Jam</span>
             </div>
 
             {/* Quick Refresh Button */}
@@ -1023,16 +1177,19 @@ export default function AdminTokoPage() {
             <button
               type="button"
               onClick={handleLogout}
-              className="text-xs font-medium text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+              className="text-xs font-semibold text-rose-700 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 border border-rose-200/80 px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
+              title="Kunci sesi dan keluar dari dashboard admin"
             >
-              Keluar
+              <span>🔒</span>
+              <span className="hidden sm:inline">Kunci & Keluar</span>
+              <span className="sm:hidden">Keluar</span>
             </button>
           </div>
         </div>
       </header>
 
       {/* Main Container */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full flex-1 space-y-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-8 w-full flex-1 space-y-5 sm:space-y-6">
         {/* Order Feedback Toast */}
         {orderFeedback && (
           <div
@@ -1057,31 +1214,31 @@ export default function AdminTokoPage() {
         )}
         {/* Metric Cards (Statistik Toko) */}
         {stats && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
             <button
               type="button"
               onClick={() => {
                 setActiveTab('pesanan');
                 setOrderStatusFilter('PENDING');
               }}
-              className="bg-white p-5 rounded-2xl border border-stone-200/80 shadow-sm text-left hover:border-amber-400 transition-all cursor-pointer group"
+              className="bg-white p-3.5 sm:p-5 rounded-2xl border border-stone-200/80 shadow-sm text-left hover:border-amber-400 transition-all cursor-pointer group"
             >
               <div className="flex items-center justify-between text-xs font-medium text-stone-500 mb-2">
                 <span>Pesanan Menunggu WA</span>
                 <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
               </div>
-              <p className="text-2xl font-bold text-amber-900">
+              <p className="text-xl sm:text-2xl font-bold text-amber-900">
                 {stats.pending_orders} <span className="text-xs font-normal text-stone-500">pesanan</span>
               </p>
               <p className="text-[11px] text-amber-700 mt-1 group-hover:underline">Klik untuk proses →</p>
             </button>
 
-            <div className="bg-white p-5 rounded-2xl border border-stone-200/80 shadow-sm">
+            <div className="bg-white p-3.5 sm:p-5 rounded-2xl border border-stone-200/80 shadow-sm">
               <div className="text-xs font-medium text-stone-500 mb-2">
                 Total Omset Penjualan
               </div>
-              <p className="text-2xl font-bold text-emerald-700">
-                Rp {stats.total_revenue.toLocaleString('id-ID')}
+              <p className="text-base min-[400px]:text-xl sm:text-2xl font-bold text-emerald-700 break-words">
+                Rp {Number(stats?.total_revenue || 0).toLocaleString('id-ID')}
               </p>
               <p className="text-[11px] text-stone-400 mt-1">
                 Dari {stats.total_orders} total pesanan
@@ -1091,12 +1248,12 @@ export default function AdminTokoPage() {
             <button
               type="button"
               onClick={() => setActiveTab('stok')}
-              className="bg-white p-5 rounded-2xl border border-stone-200/80 shadow-sm text-left hover:border-zinc-400 transition-all cursor-pointer group"
+              className="bg-white p-3.5 sm:p-5 rounded-2xl border border-stone-200/80 shadow-sm text-left hover:border-zinc-400 transition-all cursor-pointer group"
             >
               <div className="text-xs font-medium text-stone-500 mb-2">
                 Produk Aktif
               </div>
-              <p className="text-2xl font-bold text-zinc-900">
+              <p className="text-xl sm:text-2xl font-bold text-zinc-900">
                 {stats.total_products} <span className="text-xs font-normal text-stone-500">model baju</span>
               </p>
               <p className="text-[11px] text-zinc-600 mt-1 group-hover:underline">Kelola stok →</p>
@@ -1105,7 +1262,7 @@ export default function AdminTokoPage() {
             <button
               type="button"
               onClick={() => setActiveTab('alerts')}
-              className="bg-white p-5 rounded-2xl border border-stone-200/80 shadow-sm text-left hover:border-rose-400 transition-all cursor-pointer group"
+              className="bg-white p-3.5 sm:p-5 rounded-2xl border border-stone-200/80 shadow-sm text-left hover:border-rose-400 transition-all cursor-pointer group"
             >
               <div className="text-xs font-medium text-stone-500 mb-2 flex items-center justify-between">
                 <span>Stok Habis / Menipis</span>
@@ -1113,7 +1270,7 @@ export default function AdminTokoPage() {
                   <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
                 )}
               </div>
-              <p className="text-2xl font-bold text-rose-700">
+              <p className="text-xl sm:text-2xl font-bold text-rose-700">
                 {stats.out_of_stock} <span className="text-xs font-normal text-stone-500">habis ({stats.low_stock} menipis)</span>
               </p>
               <p className="text-[11px] text-rose-600 mt-1 group-hover:underline">Buka alert stok & restock →</p>
@@ -1122,11 +1279,11 @@ export default function AdminTokoPage() {
         )}
 
         {/* Tab Navigation */}
-        <div className="flex border-b border-stone-200 bg-white rounded-t-2xl px-6 pt-3 gap-6 text-sm font-semibold text-stone-500 overflow-x-auto scrollbar-hide">
+        <div className="flex border-b border-stone-200 bg-white rounded-t-2xl px-4 sm:px-6 pt-3 gap-5 sm:gap-6 text-sm font-semibold text-stone-500 overflow-x-auto scrollbar-hide">
           <button
             type="button"
             onClick={() => setActiveTab('pesanan')}
-            className={`pb-3.5 border-b-2 flex items-center gap-2 transition-all cursor-pointer ${
+            className={`pb-3.5 border-b-2 flex items-center gap-2 shrink-0 whitespace-nowrap transition-all cursor-pointer ${
               activeTab === 'pesanan'
                 ? 'border-zinc-900 text-zinc-900'
                 : 'border-transparent hover:text-zinc-800'
@@ -1144,7 +1301,7 @@ export default function AdminTokoPage() {
           <button
             type="button"
             onClick={() => setActiveTab('stok')}
-            className={`pb-3.5 border-b-2 flex items-center gap-2 transition-all cursor-pointer ${
+            className={`pb-3.5 border-b-2 flex items-center gap-2 shrink-0 whitespace-nowrap transition-all cursor-pointer ${
               activeTab === 'stok'
                 ? 'border-zinc-900 text-zinc-900'
                 : 'border-transparent hover:text-zinc-800'
@@ -1158,7 +1315,7 @@ export default function AdminTokoPage() {
           <button
             type="button"
             onClick={() => setActiveTab('alerts')}
-            className={`pb-3.5 border-b-2 flex items-center gap-2 transition-all cursor-pointer ${
+            className={`pb-3.5 border-b-2 flex items-center gap-2 shrink-0 whitespace-nowrap transition-all cursor-pointer ${
               activeTab === 'alerts'
                 ? 'border-zinc-900 text-zinc-900'
                 : 'border-transparent hover:text-zinc-800'
@@ -1176,7 +1333,7 @@ export default function AdminTokoPage() {
           <button
             type="button"
             onClick={() => setActiveTab('tambah')}
-            className={`pb-3.5 border-b-2 flex items-center gap-2 transition-all cursor-pointer ${
+            className={`pb-3.5 border-b-2 flex items-center gap-2 shrink-0 whitespace-nowrap transition-all cursor-pointer ${
               activeTab === 'tambah'
                 ? 'border-zinc-900 text-zinc-900'
                 : 'border-transparent hover:text-zinc-800'
@@ -1189,7 +1346,7 @@ export default function AdminTokoPage() {
           <button
             type="button"
             onClick={() => setActiveTab('ongkir')}
-            className={`pb-3.5 border-b-2 flex items-center gap-2 transition-all cursor-pointer ${
+            className={`pb-3.5 border-b-2 flex items-center gap-2 shrink-0 whitespace-nowrap transition-all cursor-pointer ${
               activeTab === 'ongkir'
                 ? 'border-zinc-900 text-zinc-900'
                 : 'border-transparent hover:text-zinc-800'
@@ -1204,7 +1361,7 @@ export default function AdminTokoPage() {
             TAB 1: PESANAN MASUK
             ───────────────────────────────────────── */}
         {activeTab === 'pesanan' && (
-          <div className="bg-white rounded-b-2xl p-6 border border-t-0 border-stone-200/80 shadow-sm space-y-6 animate-fade-in">
+          <div className="bg-white rounded-b-2xl p-4 sm:p-6 border border-t-0 border-stone-200/80 shadow-sm space-y-6 animate-fade-in">
             {/* Filter bar */}
             <div className="flex flex-col sm:flex-row justify-between gap-4 items-center">
               <div className="flex flex-wrap gap-2 text-xs font-semibold w-full sm:w-auto">
@@ -1268,7 +1425,7 @@ export default function AdminTokoPage() {
                   return (
                     <div
                       key={o.id}
-                      className="border border-stone-200 rounded-2xl p-5 hover:shadow-md transition-shadow bg-stone-50/30 space-y-4"
+                      className="border border-stone-200 rounded-2xl p-4 sm:p-5 hover:shadow-md transition-shadow bg-stone-50/30 space-y-4"
                     >
                       {/* Order Header */}
                       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-100 pb-3">
@@ -1292,7 +1449,7 @@ export default function AdminTokoPage() {
                       <div className="grid grid-cols-1 md:grid-cols-12 gap-6 text-xs">
                         {/* Customer & Address (md:col-span-5) */}
                         <div className="md:col-span-5 space-y-2">
-                          <div className="flex items-center justify-between">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
                             <p className="font-bold text-zinc-900 text-sm">{o.customer_name}</p>
                             <a
                               href={waChatUrl}
@@ -1325,14 +1482,14 @@ export default function AdminTokoPage() {
                           </p>
                           <div className="space-y-1.5 bg-white p-3 rounded-xl border border-stone-200/60">
                             {o.items.map((item, idx) => (
-                              <div key={idx} className="flex justify-between items-center text-xs">
+                              <div key={idx} className="flex justify-between items-center gap-3 text-xs">
                                 <div>
                                   <p className="font-semibold text-zinc-900">{item.product_title}</p>
                                   <p className="text-[11px] text-stone-500">
                                     {item.color} · Size {item.size} · {item.quantity} pcs
                                   </p>
                                 </div>
-                                <span className="font-semibold text-zinc-800">
+                                <span className="font-semibold text-zinc-800 shrink-0 whitespace-nowrap">
                                   Rp {Number(item.subtotal).toLocaleString('id-ID')}
                                 </span>
                               </div>
@@ -1448,7 +1605,7 @@ export default function AdminTokoPage() {
             TAB 2: PRODUK & STOK
             ───────────────────────────────────────── */}
         {activeTab === 'stok' && (
-          <div className="bg-white rounded-b-2xl p-6 border border-t-0 border-stone-200/80 shadow-sm space-y-6 animate-fade-in">
+          <div className="bg-white rounded-b-2xl p-4 sm:p-6 border border-t-0 border-stone-200/80 shadow-sm space-y-6 animate-fade-in">
             {/* Header Title & CTA */}
             <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
               <div>
@@ -1663,7 +1820,7 @@ export default function AdminTokoPage() {
                       }`}
                     >
                       {/* Product Info Left */}
-                      <div className="flex gap-3.5 items-start">
+                      <div className="flex gap-3.5 items-start w-full md:w-auto min-w-0">
                         {/* Checkbox */}
                         <div className="pt-2">
                           <input
@@ -1692,7 +1849,7 @@ export default function AdminTokoPage() {
                         </div>
 
                         {/* Detail text */}
-                        <div className="space-y-1.5">
+                        <div className="space-y-1.5 min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <Link
                               href={`/produk/${p.slug}`}
@@ -1833,7 +1990,7 @@ export default function AdminTokoPage() {
                                       [v.id]: Math.max(0, currentVal - 1),
                                     })
                                   }
-                                  className="w-5 h-6 bg-white hover:bg-stone-200 text-stone-700 rounded border border-stone-300 text-[10px] font-bold flex items-center justify-center cursor-pointer"
+                                  className="w-7 h-7 sm:w-5 sm:h-6 bg-white hover:bg-stone-200 text-stone-700 rounded border border-stone-300 text-[10px] font-bold flex items-center justify-center cursor-pointer"
                                   title="Kurang 1"
                                 >
                                   -
@@ -1858,7 +2015,7 @@ export default function AdminTokoPage() {
                                       [v.id]: currentVal + 1,
                                     })
                                   }
-                                  className="w-5 h-6 bg-white hover:bg-stone-200 text-stone-700 rounded border border-stone-300 text-[10px] font-bold flex items-center justify-center cursor-pointer"
+                                  className="w-7 h-7 sm:w-5 sm:h-6 bg-white hover:bg-stone-200 text-stone-700 rounded border border-stone-300 text-[10px] font-bold flex items-center justify-center cursor-pointer"
                                   title="Tambah 1"
                                 >
                                   +
@@ -1868,7 +2025,7 @@ export default function AdminTokoPage() {
                                   type="button"
                                   disabled={isUpdating}
                                   onClick={() => handleUpdateStock(v.id, currentVal)}
-                                  className="px-2 py-1 bg-zinc-900 hover:bg-zinc-800 text-white rounded text-[10px] font-bold transition-colors cursor-pointer disabled:opacity-50"
+                                  className="px-2.5 py-1.5 sm:px-2 sm:py-1 bg-zinc-900 hover:bg-zinc-800 text-white rounded text-[10px] font-bold transition-colors cursor-pointer disabled:opacity-50"
                                 >
                                   {isUpdating ? '...' : 'Simpan'}
                                 </button>
@@ -1889,7 +2046,7 @@ export default function AdminTokoPage() {
             TAB 2B: ALERT STOK MENIPIS & HABIS
             ───────────────────────────────────────── */}
         {activeTab === 'alerts' && (
-          <div className="bg-white rounded-b-2xl p-6 border border-t-0 border-stone-200/80 shadow-sm space-y-6 animate-fade-in">
+          <div className="bg-white rounded-b-2xl p-4 sm:p-6 border border-t-0 border-stone-200/80 shadow-sm space-y-6 animate-fade-in">
             {/* Header */}
             <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
               <div>
@@ -1972,7 +2129,7 @@ export default function AdminTokoPage() {
                       className="py-4 flex flex-col md:flex-row gap-4 items-start md:items-center justify-between"
                     >
                       {/* Product & Variant info */}
-                      <div className="flex items-center gap-3.5">
+                      <div className="flex items-center gap-3.5 min-w-0">
                         <div className="relative w-12 h-14 bg-stone-100 rounded-lg overflow-hidden shrink-0 border border-stone-200">
                           {item.primary_image ? (
                             <Image
@@ -1989,7 +2146,7 @@ export default function AdminTokoPage() {
                           )}
                         </div>
 
-                        <div className="space-y-1">
+                        <div className="space-y-1 min-w-0">
                           <Link
                             href={`/produk/${item.product_slug}`}
                             target="_blank"
@@ -2030,7 +2187,7 @@ export default function AdminTokoPage() {
                         </div>
 
                         {/* Quick Restock Action Buttons */}
-                        <div className="flex items-center gap-1.5 bg-stone-50 p-1.5 rounded-xl border border-stone-200">
+                        <div className="flex flex-wrap items-center gap-1.5 bg-stone-50 p-1.5 rounded-xl border border-stone-200">
                           <span className="text-[11px] font-semibold text-stone-500 px-1">Restock:</span>
                           <button
                             type="button"
@@ -2097,7 +2254,7 @@ export default function AdminTokoPage() {
             TAB 3: TAMBAH BAJU BARU
             ───────────────────────────────────────── */}
         {activeTab === 'tambah' && (
-          <div className="bg-white rounded-b-2xl p-6 sm:p-8 border border-t-0 border-stone-200/80 shadow-sm max-w-2xl mx-auto space-y-6 animate-fade-in">
+          <div className="bg-white rounded-b-2xl p-4 sm:p-8 border border-t-0 border-stone-200/80 shadow-sm max-w-2xl mx-auto space-y-6 animate-fade-in">
             <div>
               <h2 className="text-lg font-bold text-zinc-900">Tambah Baju Baru ke Katalog</h2>
               <p className="text-xs text-stone-500">
@@ -2132,7 +2289,7 @@ export default function AdminTokoPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-zinc-700 mb-1">
                     Harga Jual (Rp) <span className="text-rose-500">*</span>
@@ -2169,7 +2326,7 @@ export default function AdminTokoPage() {
                   VARIASI WARNA & FOTO (MULTI-COLOR UPLOAD)
                   ───────────────────────────────────────── */}
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <h3 className="font-bold text-zinc-900 text-sm">
                       Variasi Warna & Foto Khusus Pakaian
@@ -2181,7 +2338,7 @@ export default function AdminTokoPage() {
                   <button
                     type="button"
                     onClick={addColorVariation}
-                    className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-zinc-800 rounded-xl text-xs font-bold border border-stone-300 transition-colors flex items-center gap-1 cursor-pointer"
+                    className="self-start shrink-0 px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-zinc-800 rounded-xl text-xs font-bold border border-stone-300 transition-colors flex items-center gap-1 cursor-pointer"
                   >
                     <span>+</span>
                     <span>Tambah Warna Lain</span>
@@ -2194,7 +2351,7 @@ export default function AdminTokoPage() {
                     className="p-4 bg-stone-50 rounded-2xl border border-stone-200 space-y-4 transition-all"
                   >
                     {/* Header Variation */}
-                    <div className="flex items-center justify-between border-b border-stone-200/70 pb-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200/70 pb-2.5">
                       <div className="flex items-center gap-2">
                         <span className="w-5 h-5 rounded-full bg-zinc-900 text-white text-[10px] font-bold flex items-center justify-center">
                           {idx + 1}
@@ -2375,7 +2532,7 @@ export default function AdminTokoPage() {
             TAB 4: TARIF ONGKIR
             ───────────────────────────────────────── */}
         {activeTab === 'ongkir' && (
-          <div className="bg-white rounded-b-2xl p-6 border border-t-0 border-stone-200/80 shadow-sm space-y-4 animate-fade-in">
+          <div className="bg-white rounded-b-2xl p-4 sm:p-6 border border-t-0 border-stone-200/80 shadow-sm space-y-4 animate-fade-in">
             <div>
               <h2 className="text-base font-bold text-zinc-900">Tarif Ongkos Kirim per Provinsi</h2>
               <p className="text-xs text-stone-500">
@@ -2385,7 +2542,7 @@ export default function AdminTokoPage() {
 
             <div className="divide-y divide-stone-100">
               {shippingRates.map((r) => (
-                <div key={r.id} className="py-3 flex items-center justify-between gap-4 text-xs">
+                <div key={r.id} className="py-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs">
                   <div>
                     <p className="font-bold text-zinc-900">{r.province}</p>
                     <p className="text-[11px] text-stone-400">Estimasi sampai: {r.estimated_delivery}</p>
@@ -2420,11 +2577,11 @@ export default function AdminTokoPage() {
           MODAL: KELOLA FOTO VARIASI WARNA (PRODUK TERDAFTAR)
           ───────────────────────────────────────── */}
       {activeColorModalProduct && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-stone-200 overflow-hidden">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[92dvh] flex flex-col shadow-2xl border border-stone-200 overflow-hidden">
             {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-stone-200 flex items-center justify-between bg-stone-50/80">
-              <div>
+            <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-stone-200 flex items-center justify-between gap-3 bg-stone-50/80">
+              <div className="min-w-0">
                 <h3 className="font-bold text-zinc-900 text-base flex items-center gap-2">
                   <span>📸</span>
                   <span>Kelola Foto Variasi Warna</span>
@@ -2436,14 +2593,14 @@ export default function AdminTokoPage() {
               <button
                 type="button"
                 onClick={() => setActiveColorModalProduct(null)}
-                className="w-8 h-8 rounded-full bg-stone-200 hover:bg-stone-300 text-stone-700 flex items-center justify-center font-bold text-sm cursor-pointer transition-colors"
+                className="w-8 h-8 shrink-0 rounded-full bg-stone-200 hover:bg-stone-300 text-stone-700 flex items-center justify-center font-bold text-sm cursor-pointer transition-colors"
               >
                 ✕
               </button>
             </div>
 
             {/* Modal Body */}
-            <div className="p-6 overflow-y-auto space-y-6">
+            <div className="p-4 sm:p-6 overflow-y-auto overscroll-contain space-y-5 sm:space-y-6">
               {colorModalSuccess && (
                 <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold animate-fade-in">
                   {colorModalSuccess}
@@ -2664,7 +2821,7 @@ export default function AdminTokoPage() {
             </div>
 
             {/* Modal Footer */}
-            <div className="px-6 py-3 border-t border-stone-200 bg-stone-50 flex justify-end">
+            <div className="px-4 sm:px-6 py-3 border-t border-stone-200 bg-stone-50 flex justify-end">
               <button
                 type="button"
                 onClick={() => setActiveColorModalProduct(null)}
@@ -2681,11 +2838,11 @@ export default function AdminTokoPage() {
           MODAL EDIT PRODUK LENGKAP
           ───────────────────────────────────────── */}
       {editingProduct && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white rounded-2xl max-w-xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-stone-200">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-xl w-full max-h-[92dvh] flex flex-col shadow-2xl overflow-hidden border border-stone-200">
             {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-stone-200 flex justify-between items-center bg-stone-50">
-              <div>
+            <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-stone-200 flex justify-between items-center gap-3 bg-stone-50">
+              <div className="min-w-0">
                 <h3 className="font-bold text-sm text-zinc-900 flex items-center gap-2">
                   <span>✏️</span>
                   <span>Edit Informasi Produk</span>
@@ -2697,14 +2854,14 @@ export default function AdminTokoPage() {
               <button
                 type="button"
                 onClick={() => setEditingProduct(null)}
-                className="w-8 h-8 rounded-full bg-stone-200 hover:bg-stone-300 text-stone-700 flex items-center justify-center font-bold text-sm cursor-pointer transition-colors"
+                className="w-8 h-8 shrink-0 rounded-full bg-stone-200 hover:bg-stone-300 text-stone-700 flex items-center justify-center font-bold text-sm cursor-pointer transition-colors"
               >
                 ✕
               </button>
             </div>
 
             {/* Modal Form */}
-            <form onSubmit={handleSaveEditProduct} className="p-6 overflow-y-auto space-y-4">
+            <form onSubmit={handleSaveEditProduct} className="p-4 sm:p-6 overflow-y-auto overscroll-contain space-y-4">
               {editSuccessMsg && (
                 <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold animate-fade-in">
                   {editSuccessMsg}
@@ -2770,7 +2927,7 @@ export default function AdminTokoPage() {
               </div>
 
               {/* Status Publikasi (Aktif vs Draft) */}
-              <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 flex items-center justify-between">
+              <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-bold text-zinc-900">Status Publikasi</p>
                   <p className="text-[11px] text-stone-500">

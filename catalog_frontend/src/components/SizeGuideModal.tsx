@@ -49,10 +49,10 @@ export default function SizeGuideModal({
       />
 
       {/* Modal Card */}
-      <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-stone-200 overflow-hidden z-10 animate-slide-up max-h-[90vh] flex flex-col">
+      <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-stone-200 overflow-hidden z-10 animate-slide-up max-h-[90dvh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-stone-100 bg-[#FAF9F6]">
-          <div>
+        <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 sm:py-5 border-b border-stone-100 bg-[#FAF9F6]">
+          <div className="min-w-0">
             <span className="text-[10px] font-semibold tracking-[0.2em] uppercase text-stone-400">
               Panduan Resmi
             </span>
@@ -62,7 +62,7 @@ export default function SizeGuideModal({
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-stone-400 hover:text-zinc-900 hover:bg-stone-200/50 transition-colors"
+            className="w-8 h-8 shrink-0 rounded-full flex items-center justify-center text-stone-400 hover:text-zinc-900 hover:bg-stone-200/50 transition-colors"
             aria-label="Tutup panduan ukuran"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -72,7 +72,7 @@ export default function SizeGuideModal({
         </div>
 
         {/* Content Body */}
-        <div className="p-6 overflow-y-auto space-y-6 text-sm">
+        <div className="p-4 sm:p-6 overflow-y-auto overscroll-contain space-y-6 text-sm">
           {/* Custom Notes if any */}
           {customNotes && (
             <div className="p-3.5 bg-amber-50/70 border border-amber-200/60 rounded-xl text-amber-900 text-xs flex items-start gap-2.5">
@@ -86,7 +86,7 @@ export default function SizeGuideModal({
 
           {/* Measurement Table */}
           <div className="overflow-x-auto rounded-xl border border-stone-200 shadow-sm">
-            <table className="w-full text-left text-xs border-collapse">
+            <table className="w-full min-w-[480px] text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-stone-50 border-b border-stone-200 text-stone-600 font-semibold uppercase tracking-wider">
                   <th className="py-3 px-4">Ukuran</th>
@@ -161,7 +161,7 @@ export default function SizeGuideModal({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 bg-stone-50 border-t border-stone-100 flex items-center justify-between text-xs">
+        <div className="px-4 sm:px-6 py-4 bg-stone-50 border-t border-stone-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
           <p className="text-stone-400">Masih ragu memilih ukuran? Konsultasikan gratis lewat WhatsApp.</p>
           <button
             onClick={onClose}

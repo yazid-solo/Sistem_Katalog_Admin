@@ -146,6 +146,7 @@ export interface CheckoutResponse {
   total_amount: number;
   subtotal_items: number;
   shipping_cost: number;
+  shipping_province?: string;
   whatsapp_url: string;
   whatsapp_message: string;
   error?: string;

@@ -11,14 +11,18 @@ import json
 import uuid
 import urllib.parse
 from django.contrib.auth import authenticate
+from django.contrib.auth.models import AnonymousUser
 from django.db import transaction
 from django.db.models import Sum, Count, Q
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import generics, filters, status
+from rest_framework import generics, filters, status, exceptions
+from rest_framework.authentication import BaseAuthentication
+from rest_framework.permissions import BasePermission, AllowAny
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from .models import Category, Product, ProductImage, Variant, ShippingRate, Order, OrderItem
 from .serializers import (
@@ -32,6 +36,61 @@ from .serializers import (
     CheckoutSerializer,
 )
 import django_filters
+
+
+# ─────────────────────────────────────────
+# SELLER AUTHENTICATION & PERMISSIONS
+# ─────────────────────────────────────────
+class SellerAuthentication(BaseAuthentication):
+    """
+    Validates Authorization: Bearer <token> for Seller Center.
+    Accepts tokens starting with 'seller_auth_' or active Django staff sessions.
+    Token expires automatically if older than 24 hours (86400 seconds).
+    """
+    SELLER_TOKEN_MAX_AGE = 24 * 3600  # 24 jam dalam detik
+
+    def authenticate(self, request):
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        token = ''
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1].strip()
+        elif request.GET.get('token'):
+            token = request.GET.get('token', '').strip()
+
+        if token.startswith('seller_auth_'):
+            # Validate 24-hour expiration based on embedded timestamp
+            parts = token.split('_')
+            try:
+                token_time = int(parts[-1])
+                current_time = int(timezone.now().timestamp())
+                if current_time - token_time > self.SELLER_TOKEN_MAX_AGE:
+                    raise exceptions.AuthenticationFailed('Sesi Anda telah kedaluwarsa setelah 24 jam. Silakan login kembali.')
+            except (ValueError, IndexError):
+                raise exceptions.AuthenticationFailed('Token otentikasi tidak valid.')
+
+            return (AnonymousUser(), token)
+
+        # Access underlying request._request to avoid DRF lazy auth recursion
+        underlying = getattr(request, '_request', request)
+        user = getattr(underlying, 'user', None)
+        if user and user.is_authenticated and user.is_staff:
+            return (user, None)
+
+        return None
+
+
+class IsSellerAuthenticated(BasePermission):
+    """
+    Ensures that only authenticated sellers or staff can access management endpoints.
+    """
+    def has_permission(self, request, view):
+        if getattr(request, 'auth', None) and isinstance(request.auth, str) and request.auth.startswith('seller_auth_'):
+            return True
+        underlying = getattr(request, '_request', request)
+        user = getattr(underlying, 'user', None)
+        if user and user.is_authenticated and user.is_staff:
+            return True
+        return False
 
 
 # ─────────────────────────────────────────
@@ -193,7 +252,9 @@ class CheckoutView(APIView):
     4. Buat pesan WhatsApp terstruktur & link wa.me
     """
     authentication_classes = []
-    permission_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'checkout'
 
     def post(self, request):
         serializer = CheckoutSerializer(data=request.data)
@@ -323,9 +384,8 @@ class CheckoutView(APIView):
             f"----------------------------------------\n"
             f"*Rincian Pesanan:*\n"
             f"{items_text}\n\n"
-            f"Subtotal Pakaian: Rp {order.subtotal_items:,.0f}\n"
-            f"Ongkos Kirim ({order.shipping_province}): Rp {order.shipping_cost:,.0f} ({est_delivery})\n"
-            f"*TOTAL TAGIHAN: Rp {order.total_amount:,.0f}*\n"
+            f"Total Pakaian: Rp {order.subtotal_items:,.0f}\n"
+            f"Daerah Pengiriman: {order.shipping_province}\n"
             f"----------------------------------------\n"
             f"📍 *Data Pengiriman:*\n"
             f"- Nama: {order.customer_name}\n"
@@ -337,9 +397,9 @@ class CheckoutView(APIView):
             f"Mohon info nomor rekening pembayarannya ya min. Terima kasih!"
         )
 
-        admin_phone = os.getenv('NEXT_PUBLIC_WHATSAPP_NUMBER') or os.getenv('WHATSAPP_NUMBER') or '6283835782010'
+        admin_phone = os.getenv('NEXT_PUBLIC_WHATSAPP_NUMBER') or os.getenv('WHATSAPP_NUMBER') or ''
         clean_admin_phone = ''.join(filter(str.isdigit, admin_phone))
-        whatsapp_url = f"https://wa.me/{clean_admin_phone}?text={urllib.parse.quote(wa_message)}"
+        whatsapp_url = f"https://wa.me/{clean_admin_phone}?text={urllib.parse.quote(wa_message)}" if clean_admin_phone else ""
 
         return Response({
             'success': True,
@@ -347,6 +407,7 @@ class CheckoutView(APIView):
             'total_amount': order.total_amount,
             'subtotal_items': order.subtotal_items,
             'shipping_cost': order.shipping_cost,
+            'shipping_province': order.shipping_province,
             'whatsapp_url': whatsapp_url,
             'whatsapp_message': wa_message,
         }, status=status.HTTP_201_CREATED)
@@ -371,10 +432,12 @@ class OrderDetailView(generics.RetrieveAPIView):
 class SellerLoginView(APIView):
     """
     POST /api/seller/login/
-    Verifikasi kata sandi admin / PIN toko.
+    Verifikasi kata sandi admin / PIN toko dengan perlindungan brute force.
     """
     authentication_classes = []
-    permission_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'seller_login'
 
     def post(self, request):
         password = request.data.get('password', '').strip()
@@ -383,18 +446,23 @@ class SellerLoginView(APIView):
         # Check Django auth
         user = authenticate(username=username, password=password)
         if user and user.is_staff:
+            now_ts = int(timezone.now().timestamp())
             return Response({
                 'success': True,
-                'token': f'seller_auth_{user.id}_{int(timezone.now().timestamp())}',
+                'token': f'seller_auth_{user.id}_{now_ts}',
+                'expires_in': 86400,
                 'username': user.username,
             })
 
-        # Fallback to default admin123
-        if password == 'admin123':
+        # Check SELLER_PASSCODE from environment
+        seller_passcode = os.getenv('SELLER_PASSCODE') or os.getenv('ADMIN_PASSCODE')
+        if seller_passcode and password == seller_passcode:
+            now_ts = int(timezone.now().timestamp())
             return Response({
                 'success': True,
-                'token': f'seller_auth_admin_{int(timezone.now().timestamp())}',
-                'username': 'admin',
+                'token': f'seller_auth_admin_{now_ts}',
+                'expires_in': 86400,
+                'username': username or 'admin',
             })
 
         return Response({'error': 'Kata sandi atau PIN admin salah.'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -404,35 +472,37 @@ class SellerLoginView(APIView):
 class SellerStatsView(APIView):
     """
     GET /api/seller/stats/
-    Ringkasan performa toko untuk kartu metrik.
+    Ringkasan performa toko untuk kartu metrik dengan query agregasi berkecepatan tinggi.
     """
-    authentication_classes = []
-    permission_classes = []
+    authentication_classes = [SellerAuthentication]
+    permission_classes = [IsSellerAuthenticated]
 
     def get(self, request):
-        total_orders = Order.objects.count()
-        pending_orders = Order.objects.filter(status='PENDING').count()
-        confirmed_orders = Order.objects.filter(status='CONFIRMED').count()
-        shipped_orders = Order.objects.filter(status='SHIPPED').count()
-
-        rev_data = Order.objects.exclude(status='CANCELLED').aggregate(total=Sum('total_amount'))
-        total_revenue = rev_data['total'] or 0
+        order_stats = Order.objects.aggregate(
+            total_orders=Count('id'),
+            pending_orders=Count('id', filter=Q(status='PENDING')),
+            confirmed_orders=Count('id', filter=Q(status='CONFIRMED')),
+            shipped_orders=Count('id', filter=Q(status='SHIPPED')),
+            total_revenue=Sum('total_amount', filter=~Q(status='CANCELLED')),
+        )
+        total_revenue = order_stats['total_revenue'] or 0
 
         total_products = Product.objects.filter(is_active=True).count()
-        out_of_stock = Variant.objects.filter(stock_quantity=0, product__is_active=True).count()
-        low_stock = Variant.objects.filter(
-            stock_quantity__gt=0, stock_quantity__lte=3, product__is_active=True
-        ).count()
+
+        variant_stats = Variant.objects.filter(product__is_active=True).aggregate(
+            out_of_stock=Count('id', filter=Q(stock_quantity=0)),
+            low_stock=Count('id', filter=Q(stock_quantity__gt=0, stock_quantity__lte=3)),
+        )
 
         return Response({
-            'total_orders': total_orders,
-            'pending_orders': pending_orders,
-            'confirmed_orders': confirmed_orders,
-            'shipped_orders': shipped_orders,
+            'total_orders': order_stats['total_orders'] or 0,
+            'pending_orders': order_stats['pending_orders'] or 0,
+            'confirmed_orders': order_stats['confirmed_orders'] or 0,
+            'shipped_orders': order_stats['shipped_orders'] or 0,
             'total_revenue': total_revenue,
             'total_products': total_products,
-            'out_of_stock': out_of_stock,
-            'low_stock': low_stock,
+            'out_of_stock': variant_stats['out_of_stock'] or 0,
+            'low_stock': variant_stats['low_stock'] or 0,
         })
 
 
@@ -440,10 +510,10 @@ class SellerStatsView(APIView):
 class SellerOrderListView(generics.ListAPIView):
     """
     GET /api/seller/orders/
-    Daftar pesanan dengan filter status dan pencarian.
+    Daftar pesanan dengan filter status dan pencarian (terproteksi & dibatasi aman).
     """
-    authentication_classes = []
-    permission_classes = []
+    authentication_classes = [SellerAuthentication]
+    permission_classes = [IsSellerAuthenticated]
     serializer_class = OrderDetailSerializer
     pagination_class = None
 
@@ -463,7 +533,14 @@ class SellerOrderListView(generics.ListAPIView):
                 Q(tracking_number__icontains=search)
             )
 
-        return qs
+        limit = self.request.query_params.get('limit')
+        if limit:
+            try:
+                limit_int = max(1, min(500, int(limit)))
+                return qs[:limit_int]
+            except ValueError:
+                pass
+        return qs[:150]
 
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -472,8 +549,8 @@ class SellerOrderStatusUpdateView(APIView):
     PATCH /api/seller/orders/<order_number>/status/
     Ubah status pesanan (Lunas, Kirim, Batal) & input nomor resi.
     """
-    authentication_classes = []
-    permission_classes = []
+    authentication_classes = [SellerAuthentication]
+    permission_classes = [IsSellerAuthenticated]
 
     def patch(self, request, order_number):
         try:
@@ -505,8 +582,8 @@ class SellerVariantStockUpdateView(APIView):
     PATCH /api/seller/variants/<int:pk>/stock/
     Edit cepat angka stok per varian baju.
     """
-    authentication_classes = []
-    permission_classes = []
+    authentication_classes = [SellerAuthentication]
+    permission_classes = [IsSellerAuthenticated]
 
     def patch(self, request, pk):
         try:
@@ -538,8 +615,8 @@ class SellerShippingRateUpdateView(APIView):
     PATCH /api/seller/shipping-rates/<int:pk>/
     Ubah tarif ongkir per provinsi.
     """
-    authentication_classes = []
-    permission_classes = []
+    authentication_classes = [SellerAuthentication]
+    permission_classes = [IsSellerAuthenticated]
 
     def patch(self, request, pk):
         try:
@@ -571,8 +648,8 @@ class SellerProductListView(generics.ListAPIView):
     GET /api/seller/products/
     Daftar produk lengkap dengan foto dan varian untuk admin toko.
     """
-    authentication_classes = []
-    permission_classes = []
+    authentication_classes = [SellerAuthentication]
+    permission_classes = [IsSellerAuthenticated]
     serializer_class = ProductAdminSerializer
     pagination_class = None
 
@@ -593,8 +670,8 @@ class SellerProductCreateView(APIView):
     Tambah baju baru lengkap dengan foto & variasi warna/ukuran dalam 1 form simpel!
     Mendukung upload foto khusus per variasi warna.
     """
-    authentication_classes = []
-    permission_classes = []
+    authentication_classes = [SellerAuthentication]
+    permission_classes = [IsSellerAuthenticated]
 
     def post(self, request):
         title = request.data.get('title', '').strip()
@@ -739,8 +816,8 @@ class SellerColorImageUploadView(APIView):
     POST /api/seller/products/<int:pk>/color-image/
     Upload atau ganti foto khusus untuk variasi warna tertentu dari produk yang sudah ada.
     """
-    authentication_classes = []
-    permission_classes = []
+    authentication_classes = [SellerAuthentication]
+    permission_classes = [IsSellerAuthenticated]
 
     def post(self, request, pk):
         try:
@@ -827,8 +904,8 @@ class SellerProductImageDeleteView(APIView):
     DELETE /api/seller/products/<int:pk>/images/<int:image_id>/
     Hapus foto warna produk.
     """
-    authentication_classes = []
-    permission_classes = []
+    authentication_classes = [SellerAuthentication]
+    permission_classes = [IsSellerAuthenticated]
 
     def delete(self, request, pk, image_id):
         try:
@@ -845,8 +922,8 @@ class SellerProductUpdateView(APIView):
     PATCH /api/seller/products/<int:pk>/update/
     Edit produk: nama, harga, deskripsi, kategori, status aktif/draft.
     """
-    authentication_classes = []
-    permission_classes = []
+    authentication_classes = [SellerAuthentication]
+    permission_classes = [IsSellerAuthenticated]
 
     def patch(self, request, pk):
         try:
@@ -898,8 +975,8 @@ class SellerProductBulkActionView(APIView):
     Bulk actions: delete, activate, deactivate.
     Body: { action: 'delete'|'activate'|'deactivate', ids: [1,2,3] }
     """
-    authentication_classes = []
-    permission_classes = []
+    authentication_classes = [SellerAuthentication]
+    permission_classes = [IsSellerAuthenticated]
 
     def post(self, request):
         action = request.data.get('action')
@@ -930,8 +1007,8 @@ class SellerLowStockAlertsView(APIView):
     GET /api/seller/alerts/low-stock/
     Daftar varian dengan stok menipis atau habis.
     """
-    authentication_classes = []
-    permission_classes = []
+    authentication_classes = [SellerAuthentication]
+    permission_classes = [IsSellerAuthenticated]
 
     def get(self, request):
         threshold = int(request.query_params.get('threshold', 5))

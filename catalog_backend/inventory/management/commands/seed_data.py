@@ -38,7 +38,7 @@ REALISTIC_PRODUCTS = [
         "base_price": 329000,
         "size_guide": "Model pria bertinggi 178 cm, berat 70 kg, mengenakan ukuran L untuk regular fit.",
         "images": [
-            {"url": "https://images.unsplash.com/photo-1620012253295-c15c429fbb41?w=1200&q=85", "is_primary": True, "alt": "Kemeja Oxford Button-Down Putih Bersih", "color": "Putih Bersih"},
+            {"url": "https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?w=1200&q=85", "is_primary": True, "alt": "Kemeja Oxford Button-Down Putih Bersih", "color": "Putih Bersih"},
             {"url": "https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=1200&q=85", "is_primary": False, "alt": "Kemeja Oxford Button-Down Biru Langit", "color": "Biru Langit"},
         ],
         "variants": [
