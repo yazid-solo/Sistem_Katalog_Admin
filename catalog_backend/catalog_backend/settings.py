@@ -13,6 +13,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-fallback-key')
 DEBUG = config('DEBUG', default=True, cast=bool)
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1').split(',')
+if DEBUG:
+    # Allow tunneling domains during development/sharing (Cloudflare, Ngrok, Localtunnel)
+    for host in ['*', '.trycloudflare.com', '.ngrok-free.app', '.ngrok.io', '.loca.lt', 'frontend', 'backend']:
+        if host not in ALLOWED_HOSTS:
+            ALLOWED_HOSTS.append(host)
 
 # ─────────────────────────────────────────
 # APPLICATIONS
@@ -134,6 +139,7 @@ REST_FRAMEWORK = {
         'user': '600/minute',
         'checkout': '20/minute',
         'seller_login': '10/minute',
+        'order_tracking': '30/minute',
     },
 }
 
@@ -157,5 +163,9 @@ CSRF_TRUSTED_ORIGINS = [
     'http://127.0.0.1',
     'http://localhost:8000',
     'http://localhost:3000',
+    'https://*.trycloudflare.com',
+    'https://*.ngrok-free.app',
+    'https://*.ngrok.io',
+    'https://*.loca.lt',
 ]
 

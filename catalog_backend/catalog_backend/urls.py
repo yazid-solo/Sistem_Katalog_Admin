@@ -7,9 +7,9 @@ from django.conf import settings
 from django.conf.urls.static import static
 
 # Customize Admin branding
-admin.site.site_header = "Katalog Pakaian Premium — Admin"
-admin.site.site_title = "Admin Katalog"
-admin.site.index_title = "Manajemen Inventaris"
+admin.site.site_header = "DLRS — Admin Katalog Pakaian"
+admin.site.site_title = "DLRS Admin Katalog"
+admin.site.index_title = "Manajemen Katalog & Inventaris Pakaian"
 
 urlpatterns = [
     path('admin/', admin.site.urls),

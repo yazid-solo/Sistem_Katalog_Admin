@@ -2,7 +2,7 @@ import { Suspense } from 'react';
 import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
-import { getProducts, getCategories } from '@/lib/api';
+import { getProducts, getCategories, getConsultationWhatsAppLink } from '@/lib/api';
 import Navbar from '@/components/Navbar';
 import ProductCard from '@/components/ProductCard';
 import FilterBar from '@/components/FilterBar';
@@ -10,9 +10,12 @@ import { ProductGridSkeleton } from '@/components/SkeletonLoaders';
 import SortSelect from '@/components/SortSelect';
 import type { FilterParams } from '@/types';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export const metadata: Metadata = {
-  title: 'Atelier Nusa — Katalog Pakaian Esensial & Modern',
-  description: 'Koleksi busana pilihan berbahan French Linen, Oxford 40s, dan Crepe Twill. Didesain nyaman, sejuk, dan presisi untuk iklim tropis.',
+  title: 'DLRS — Katalog Pakaian Harian, Santai & Muslimah Lengkap',
+  description: 'Pusat koleksi Daster, Kulot, Kulot Polos, Celana Pendek, Bogo, Setelan Dewasa & Anak, Kaos, Outer, Kain Pantai, Mukena, dan Hijab dengan bahan adem pilihan dan harga bersahabat.',
 };
 
 interface PageProps {
@@ -85,9 +88,9 @@ async function ProductGrid({ searchParams }: PageProps) {
     );
   }
 
-  // Pagination numbers
+  // Pagination numbers (Backend PAGE_SIZE = 20)
   const currentPage = filters.page || 1;
-  const totalPages = Math.ceil(data.count / 12);
+  const totalPages = Math.ceil(data.count / 20);
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -171,52 +174,64 @@ export default async function HomePage({ searchParams }: PageProps) {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-8 items-center">
             
             {/* Left Column: Brand Story & Call to Action */}
-            <div className="lg:col-span-7 space-y-6">
-              {/* Seasonal Atelier Pill */}
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-[10.5px] tracking-[0.25em] font-bold uppercase bg-stone-200/70 text-stone-700 border border-stone-300/80 shadow-2xs">
-                <span className="w-1.5 h-1.5 rounded-full bg-stone-900" />
-                <span>EDISI KAPSUL 2026 // ATELIER NUSA</span>
-              </div>
-
+            <div className="lg:col-span-7 space-y-5">
               {/* Editorial Headline */}
-              <h1 className="font-serif text-4xl sm:text-5xl lg:text-[3.5rem] font-normal text-stone-900 tracking-tight leading-[1.12]">
-                Koleksi Busana Esensial, <br />
-                <span className="italic font-normal text-stone-600">Ditenun untuk Kenyamanan.</span>
+              <h1 className="font-serif text-4xl sm:text-5xl lg:text-[3.35rem] font-normal text-stone-900 tracking-tight leading-[1.12]">
+                Koleksi Pakaian Harian, <br />
+                <span className="italic font-normal text-stone-600">Sejuk, Nyaman &amp; Bersahabat.</span>
               </h1>
 
               {/* Subheadline with Substance */}
               <p className="text-sm md:text-base font-light text-stone-600 max-w-xl leading-relaxed">
-                Material French Linen murni, Katun Oxford 40s benang ganda, dan Crepe Twill bertekstur lembut. 
-                Dipotong presisi dengan siluet kontemporer yang sejuk, adem, dan rapi untuk gaya harian di iklim tropis.
+                Hadir lengkap mulai dari <strong className="font-medium text-stone-800">Daster, Kulot &amp; Kulot Polos, Setelan Panjang/Pendek, Setelan Anak, Celana Pendek &amp; Bogo, Kaos, Outer, Kain Pantai,</strong> hingga <strong className="font-medium text-stone-800">Mukena dan Hijab</strong>. Bahan Rayon Viscose, Crinkle Airflow, dan Katun Combed yang adem untuk aktivitas sepanjang hari.
               </p>
 
+              {/* 12 Quick Item Highlights */}
+              <div className="flex flex-wrap gap-1.5 pt-1 max-w-xl">
+                {[
+                  { label: 'Kulot', href: '/?category=kulot' },
+                  { label: 'Kulot Polos', href: '/?category=kulot&search=Polos' },
+                  { label: 'Celana Pendek', href: '/?category=celana-pendek-bogo' },
+                  { label: 'Bogo', href: '/?category=celana-pendek-bogo&search=Bogo' },
+                  { label: 'Kaos', href: '/?category=kaos' },
+                  { label: 'Daster', href: '/?category=daster' },
+                  { label: 'Setelan Panjang/Pendek', href: '/?category=setelan' },
+                  { label: 'Kain Pantai', href: '/?category=kain-pantai' },
+                  { label: 'Outer', href: '/?category=outer' },
+                  { label: 'Setelan Anak', href: '/?category=setelan-anak' },
+                  { label: 'Mukena', href: '/?category=mukena-hijab&search=Mukena' },
+                  { label: 'Hijab', href: '/?category=mukena-hijab&search=Hijab' },
+                ].map((item) => (
+                  <Link
+                    key={item.label}
+                    href={item.href}
+                    className="text-[11px] font-medium px-3 py-1 rounded-full bg-white border border-stone-200/90 text-stone-700 hover:bg-stone-900 hover:text-white hover:border-stone-900 transition-all shadow-2xs"
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+              </div>
+
               {/* CTA Action Row */}
-              <div className="flex flex-wrap items-center gap-3.5 pt-2">
+              <div className="pt-2">
                 <a
                   href="#katalog"
-                  className="inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-full bg-stone-900 text-white text-xs font-semibold tracking-wider uppercase transition-all duration-300 hover:bg-stone-800 hover:shadow-md active:scale-98"
+                  className="inline-flex items-center justify-center gap-2.5 px-7 py-3.5 rounded-full bg-stone-900 text-white text-xs font-semibold tracking-wider uppercase transition-all duration-300 hover:bg-stone-800 hover:shadow-md active:scale-98"
                 >
-                  <span>Jelajahi Katalog</span>
+                  <span>Jelajahi Katalog Pakaian</span>
                   <span>↓</span>
                 </a>
-                <Link
-                  href="/lacak-pesanan"
-                  className="inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-full border border-stone-300 bg-white text-stone-800 text-xs font-semibold tracking-wider uppercase transition-all duration-300 hover:border-stone-900 hover:bg-stone-50 active:scale-98 shadow-2xs"
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  <span>Lacak Pesanan Realtime</span>
-                </Link>
               </div>
 
               {/* Micro-Features Row */}
-              <div className="grid grid-cols-1 min-[480px]:grid-cols-3 gap-3 sm:gap-4 pt-6 border-t border-stone-200/80 text-[11px] text-stone-600 font-medium">
+              <div className="grid grid-cols-1 min-[480px]:grid-cols-3 gap-3 sm:gap-4 pt-5 border-t border-stone-200/80 text-[11px] text-stone-600 font-medium">
                 <div className="flex items-center gap-2">
                   <span className="text-stone-900 font-bold">🌿</span>
-                  <span>100% Serat Alami Terkurasi</span>
+                  <span>Bahan Adem &amp; Nyaman Harian</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-stone-900 font-bold">🔒</span>
-                  <span>Stok Terkunci Otomatis</span>
+                  <span className="text-stone-900 font-bold">📐</span>
+                  <span>Tersedia Semua Ukuran &amp; All Size</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-stone-900 font-bold">💬</span>
@@ -232,41 +247,33 @@ export default async function HomePage({ searchParams }: PageProps) {
                 {/* Primary Feature Image Card */}
                 <div className="relative aspect-[4/5] w-full max-w-[340px] mx-auto lg:mx-0 lg:ml-auto rounded-3xl overflow-hidden shadow-xl border border-stone-300/80 bg-stone-200">
                   <Image
-                    src="https://images.unsplash.com/photo-1596755094514-f87e34085b2c?w=1200&q=85"
-                    alt="Atelier Nusa French Linen Sage"
+                    src="/hero-one-set.jpg"
+                    alt="Koleksi Daster, One Set & Kulot Harian"
                     fill
                     priority
                     className="object-cover"
                     sizes="(max-width: 1024px) 50vw, 340px"
                   />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent flex flex-col justify-end p-5 text-white">
-                    <span className="text-[10px] font-mono tracking-widest uppercase opacity-80">EDISI KHUSUS</span>
-                    <p className="font-serif text-lg font-medium leading-snug">French Linen Relaxed Shirt</p>
-                    <p className="text-[11px] opacity-90 font-sans mt-0.5">Sage Green · Garment Washed</p>
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-transparent flex flex-col justify-end p-5 text-white">
+                    <span className="text-[10px] font-mono tracking-widest uppercase opacity-80">FAVORIT HARIAN</span>
+                    <p className="font-serif text-lg font-medium leading-snug">Daster, One Set &amp; Kulot Adem</p>
+                    <p className="text-[11px] opacity-90 font-sans mt-0.5">Rayon Viscose &amp; Crinkle Airflow · Mulai Rp 25rb</p>
                   </div>
                 </div>
 
                 {/* Overlapping Secondary Look Card */}
                 <div className="absolute -bottom-6 -left-6 aspect-[4/5] w-48 rounded-2xl overflow-hidden shadow-2xl border-2 border-white bg-stone-100 hidden lg:block">
                   <Image
-                    src="https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?w=800&q=85"
-                    alt="Oxford Button-Down Classic"
+                    src="/hero-kulot-gajah.png"
+                    alt="Koleksi Kulot Motif & Celana Santai"
                     fill
-                    className="object-cover"
+                    className="object-cover object-center"
                     sizes="192px"
                   />
-                  <div className="absolute bottom-2 inset-x-2 bg-white/90 backdrop-blur-xs py-1.5 px-2.5 rounded-xl text-center shadow-xs">
-                    <p className="text-[10px] font-bold text-stone-900 truncate">Oxford Classic White</p>
-                    <p className="text-[9px] text-stone-500 font-mono">100% Pima Cotton 40s</p>
+                  <div className="absolute bottom-2 inset-x-2 bg-white/95 backdrop-blur-xs py-1.5 px-2.5 rounded-xl text-center shadow-xs">
+                    <p className="text-[10px] font-bold text-stone-900 truncate">Kulot &amp; Celana Santai</p>
+                    <p className="text-[9px] text-stone-500 font-mono">All Size · Standar · Jumbo</p>
                   </div>
-                </div>
-
-                {/* Editorial Floating Quality Badge */}
-                <div className="absolute top-6 left-2 lg:-left-4 bg-white/95 backdrop-blur-md border border-stone-200 px-3.5 py-2 rounded-2xl shadow-md flex items-center gap-2.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-[11px] font-semibold text-stone-800 tracking-wide">
-                    Stok Katalog Terverifikasi
-                  </span>
                 </div>
 
               </div>
@@ -299,16 +306,25 @@ export default async function HomePage({ searchParams }: PageProps) {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10 pb-12 border-b border-stone-800 text-xs">
             {/* Col 1: Brand Info */}
             <div className="space-y-3">
-              <div>
-                <p className="text-[10px] tracking-[0.25em] uppercase text-stone-400 font-mono font-bold">
-                  STUDIO & BOUTIQUE
-                </p>
-                <p className="text-xl font-serif font-medium text-white tracking-wide mt-0.5">
-                  ATELIER NUSA
-                </p>
+              <div className="flex items-center gap-3">
+                <div className="bg-white/95 px-2.5 py-1.5 rounded-lg inline-flex items-center">
+                  <img
+                    src="/DLRS_Logo.svg"
+                    alt="Logo Katalog Pakaian DLRS"
+                    className="h-6 w-auto object-contain"
+                  />
+                </div>
+                <div>
+                  <p className="text-[10px] tracking-[0.22em] uppercase text-stone-400 font-mono font-bold">
+                    DAILY WEAR &amp; BOUTIQUE
+                  </p>
+                  <p className="text-base font-serif font-medium text-white tracking-wide">
+                    DLRS — Katalog Pakaian
+                  </p>
+                </div>
               </div>
               <p className="text-stone-400 leading-relaxed text-[11.5px]">
-                Koleksi busana berkualitas tinggi dengan serat alami pilihan seperti French Linen, Pima Cotton 40s ganda, dan Crepe Twill untuk kenyamanan berbusana harian.
+                Pusat koleksi pakaian harian, santai, anak, dan muslimah pilihan: Daster, Kulot, Kulot Polos, Celana Pendek, Bogo, Kaos, Setelan, Outer, Kain Pantai, Mukena, dan Hijab.
               </p>
             </div>
 
@@ -316,11 +332,13 @@ export default async function HomePage({ searchParams }: PageProps) {
             <div className="space-y-3">
               <p className="font-bold text-white uppercase tracking-wider text-[11px]">Koleksi Pakaian</p>
               <ul className="space-y-2 text-stone-400 text-[11.5px]">
-                <li><Link href="/?category=kemeja" className="hover:text-white transition-colors">Kemeja Linen & Oxford</Link></li>
-                <li><Link href="/?category=celana" className="hover:text-white transition-colors">Celana Wide-Leg & Chino</Link></li>
-                <li><Link href="/?category=dress" className="hover:text-white transition-colors">Dress Rayon & Satin</Link></li>
-                <li><Link href="/?category=outer" className="hover:text-white transition-colors">Outerwear & Cardigan</Link></li>
-                <li><Link href="/?category=atasan" className="hover:text-white transition-colors">Kaos Cotton Combed</Link></li>
+                <li><Link href="/?category=daster" className="hover:text-white transition-colors">Daster Rayon &amp; Harian</Link></li>
+                <li><Link href="/?category=kulot" className="hover:text-white transition-colors">Kulot &amp; Kulot Polos</Link></li>
+                <li><Link href="/?category=setelan" className="hover:text-white transition-colors">Setelan Panjang &amp; Pendek</Link></li>
+                <li><Link href="/?category=celana-pendek-bogo" className="hover:text-white transition-colors">Celana Pendek &amp; Bogo</Link></li>
+                <li><Link href="/?category=kaos" className="hover:text-white transition-colors">Kaos &amp; Outer Santai</Link></li>
+                <li><Link href="/?category=setelan-anak" className="hover:text-white transition-colors">Setelan Anak &amp; Kain Pantai</Link></li>
+                <li><Link href="/?category=mukena-hijab" className="hover:text-white transition-colors">Mukena &amp; Hijab</Link></li>
               </ul>
             </div>
 
@@ -329,15 +347,15 @@ export default async function HomePage({ searchParams }: PageProps) {
               <p className="font-bold text-white uppercase tracking-wider text-[11px]">Bantuan Pelanggan</p>
               <ul className="space-y-2 text-stone-400 text-[11.5px]">
                 <li>
-                  <Link href="/lacak-pesanan" className="hover:text-white text-emerald-400 font-medium transition-colors flex items-center gap-1.5">
+                  <Link href="/lacak-pesanan" className="hover:text-white transition-colors flex items-center gap-1.5">
                     <span>📍</span>
-                    <span>Lacak Pesanan Realtime</span>
+                    <span>Lacak Pesanan</span>
                   </Link>
                 </li>
                 <li><Link href="/keranjang" className="hover:text-white transition-colors">Keranjang & Checkout</Link></li>
                 <li>
                   <a
-                    href={`https://wa.me/${process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || ''}?text=Halo%20Admin,%20saya%20ingin%20konsultasi%20mengenai%20ukuran%20dan%20stok%20pakaian`}
+                    href={getConsultationWhatsAppLink()}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="hover:text-white transition-colors"
@@ -369,7 +387,7 @@ export default async function HomePage({ searchParams }: PageProps) {
           </div>
 
           <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-stone-500">
-            <p>© {new Date().getFullYear()} Atelier Nusa. Hak Cipta Dilindungi.</p>
+            <p>© {new Date().getFullYear()} DLRS Katalog Pakaian. Hak Cipta Dilindungi.</p>
             <p className="flex items-center gap-3">
               <span>Pengiriman Seluruh Indonesia</span>
               <span>•</span>

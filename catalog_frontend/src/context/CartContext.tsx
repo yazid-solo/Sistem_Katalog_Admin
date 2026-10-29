@@ -9,6 +9,7 @@ interface CartContextType {
   removeFromCart: (variantId: number) => void;
   updateQuantity: (variantId: number, quantity: number) => void;
   clearCart: () => void;
+  syncStockWithServer: () => Promise<string | null>;
   totalItems: number;
   subtotal: number;
   lastAddedItem: CartItem | null;
@@ -95,6 +96,55 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setLastAddedItem(null);
   };
 
+  const syncStockWithServer = async (): Promise<string | null> => {
+    if (items.length === 0) return null;
+    try {
+      const ids = items.map((i) => i.variantId).join(',');
+      const res = await fetch(`/api/orders/cart-stock/?variant_ids=${ids}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      const serverVariants: {
+        variant_id: number;
+        stock_quantity: number;
+        price: number;
+        is_product_active: boolean;
+      }[] = data.variants || [];
+
+      if (serverVariants.length === 0) return null;
+
+      const stockMap = new Map(serverVariants.map((v) => [v.variant_id, v]));
+      const notices: string[] = [];
+
+      setItems((prev) => {
+        const next: CartItem[] = [];
+        for (const item of prev) {
+          const live = stockMap.get(item.variantId);
+          if (!live || live.stock_quantity <= 0 || !live.is_product_active) {
+            notices.push(`"${item.productTitle}" (${item.color} - ${item.size}) dihapus karena stok habis.`);
+            continue;
+          }
+          const clampedQty = Math.min(item.quantity, live.stock_quantity);
+          if (clampedQty < item.quantity) {
+            notices.push(
+              `Jumlah "${item.productTitle}" (${item.color} - ${item.size}) disesuaikan menjadi ${clampedQty} pcs mengikuti sisa stok terbaru.`
+            );
+          }
+          next.push({
+            ...item,
+            quantity: clampedQty,
+            maxStock: live.stock_quantity,
+            price: live.price || item.price,
+          });
+        }
+        return next;
+      });
+
+      return notices.length > 0 ? notices.join(' ') : null;
+    } catch {
+      return null;
+    }
+  };
+
   const totalItems = items.reduce((acc, curr) => acc + curr.quantity, 0);
   const subtotal = items.reduce((acc, curr) => acc + curr.price * curr.quantity, 0);
 
@@ -106,6 +156,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         removeFromCart,
         updateQuantity,
         clearCart,
+        syncStockWithServer,
         totalItems,
         subtotal,
         lastAddedItem,

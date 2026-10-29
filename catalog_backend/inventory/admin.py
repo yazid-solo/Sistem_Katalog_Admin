@@ -21,7 +21,7 @@ class VariantInline(admin.TabularInline):
     """
     model = Variant
     extra = 3  # Show 3 empty rows for quick addition
-    fields = ('size', 'color', 'stock_quantity', 'chest_width', 'body_length', 'shoulder_width', 'sleeve_length', 'sku')
+    fields = ('size', 'color', 'stock_quantity', 'chest_width', 'body_length', 'waist_width', 'shoulder_width', 'sleeve_length', 'sku')
     readonly_fields = ()
     show_change_link = False
 
@@ -198,8 +198,8 @@ class VariantAdmin(admin.ModelAdmin):
 
     def is_available(self, obj):
         if obj.stock_quantity > 0:
-            return format_html('✅')
-        return format_html('❌')
+            return format_html('<span style="color:#16a34a; font-weight:600; font-size:12px;">Ya</span>')
+        return format_html('<span style="color:#dc2626; font-weight:600; font-size:12px;">Habis</span>')
     is_available.short_description = "Tersedia"
     is_available.boolean = False  # Use custom HTML instead of Django's boolean icons
 

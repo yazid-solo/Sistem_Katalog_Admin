@@ -80,6 +80,7 @@ class ProductListSerializer(serializers.ModelSerializer):
 
     def get_available_sizes(self, obj):
         """Return list of sizes with their availability."""
+        SIZE_ORDER = ['ALL SIZE', 'STANDAR', 'JUMBO', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', 'FREE_SIZE']
         variants = obj.variants.all()
         sizes_map = {}
         for v in variants:
@@ -87,7 +88,10 @@ class ProductListSerializer(serializers.ModelSerializer):
                 sizes_map[v.size] = {'size': v.size, 'available': False}
             if v.stock_quantity > 0:
                 sizes_map[v.size]['available'] = True
-        return list(sizes_map.values())
+        return sorted(
+            sizes_map.values(),
+            key=lambda x: SIZE_ORDER.index(x['size']) if x['size'] in SIZE_ORDER else 99
+        )
 
     def get_formatted_price(self, obj):
         """Return price formatted in Indonesian Rupiah."""
@@ -105,7 +109,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     """
     category = CategorySerializer(read_only=True)
     images = ProductImageSerializer(many=True, read_only=True)
-    variants = VariantSerializer(many=True, read_only=True)
+    variants = serializers.SerializerMethodField()
     primary_image = serializers.ReadOnlyField()
     total_stock = serializers.ReadOnlyField()
     stock_status = serializers.ReadOnlyField()
@@ -124,13 +128,21 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             'is_active', 'created_at', 'updated_at'
         ]
 
+    def get_variants(self, obj):
+        SIZE_ORDER = ['ALL SIZE', 'STANDAR', 'JUMBO', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', 'FREE_SIZE']
+        ordered = sorted(
+            obj.variants.all(),
+            key=lambda v: (v.color, SIZE_ORDER.index(v.size) if v.size in SIZE_ORDER else 99)
+        )
+        return VariantSerializer(ordered, many=True).data
+
     def get_formatted_price(self, obj):
         price = int(obj.base_price)
         return f"Rp {price:,}".replace(',', '.')
 
     def get_size_chart(self, obj):
         """Return standardized size chart table for all available sizes."""
-        SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', 'FREE_SIZE']
+        SIZE_ORDER = ['ALL SIZE', 'STANDAR', 'JUMBO', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', 'FREE_SIZE']
         chart = []
         variants = obj.variants.all()
         distinct_sizes = []
@@ -143,7 +155,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             # Fallback standard sizes
             from .models import Variant
             temp_variant = Variant(product=obj)
-            for s in ['S', 'M', 'L', 'XL']:
+            for s in ['ALL SIZE', 'STANDAR', 'JUMBO', 'S', 'M', 'L', 'XL', 'XXL']:
                 temp_variant.size = s
                 chart.append({'size': s, **temp_variant.effective_measurements})
             return chart
@@ -169,7 +181,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
           ...
         ]
         """
-        SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', 'FREE_SIZE']
+        SIZE_ORDER = ['ALL SIZE', 'STANDAR', 'JUMBO', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', 'FREE_SIZE']
         color_map = {}
 
         for variant in obj.variants.all():
@@ -218,7 +230,7 @@ class ProductAdminSerializer(serializers.ModelSerializer):
     """
     category = CategorySerializer(read_only=True)
     images = ProductImageSerializer(many=True, read_only=True)
-    variants = VariantSerializer(many=True, read_only=True)
+    variants = serializers.SerializerMethodField()
     variants_by_color = serializers.SerializerMethodField()
     primary_image = serializers.ReadOnlyField()
     total_stock = serializers.ReadOnlyField()
@@ -228,18 +240,27 @@ class ProductAdminSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = [
-            'id', 'title', 'slug', 'description',
+            'id', 'title', 'slug', 'description', 'size_guide',
             'category', 'base_price', 'formatted_price',
             'primary_image', 'total_stock', 'stock_status',
             'images', 'variants', 'variants_by_color',
             'is_active', 'created_at', 'updated_at'
         ]
 
+    def get_variants(self, obj):
+        SIZE_ORDER = ['ALL SIZE', 'STANDAR', 'JUMBO', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', 'FREE_SIZE']
+        ordered = sorted(
+            obj.variants.all(),
+            key=lambda v: (v.color, SIZE_ORDER.index(v.size) if v.size in SIZE_ORDER else 99)
+        )
+        return VariantSerializer(ordered, many=True).data
+
     def get_formatted_price(self, obj):
         price = int(obj.base_price)
         return f"Rp {price:,}".replace(',', '.')
 
     def get_variants_by_color(self, obj):
+        SIZE_ORDER = ['ALL SIZE', 'STANDAR', 'JUMBO', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', 'FREE_SIZE']
         colors_map = {}
         for v in obj.variants.all():
             if v.color not in colors_map:
@@ -254,13 +275,18 @@ class ProductAdminSerializer(serializers.ModelSerializer):
         all_images = list(obj.images.all())
         result = []
         for color, sizes in colors_map.items():
+            ordered_sizes = sorted(
+                sizes,
+                key=lambda x: SIZE_ORDER.index(x['size']) if x['size'] in SIZE_ORDER else 99
+            )
             matching_img = next((img for img in all_images if img.color and img.color.strip().lower() == color.strip().lower()), None)
             img_url = matching_img.effective_image_url if matching_img else None
             result.append({
                 'color': color,
                 'color_image': img_url,
                 'image_id': matching_img.id if matching_img else None,
-                'sizes': sizes,
+                'is_primary': matching_img.is_primary if matching_img else False,
+                'sizes': ordered_sizes,
             })
         return result
 
@@ -293,6 +319,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
 class OrderDetailSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
+    tracking_receipt_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -300,9 +327,17 @@ class OrderDetailSerializer(serializers.ModelSerializer):
             'id', 'order_number', 'customer_name', 'customer_phone',
             'shipping_province', 'shipping_city', 'shipping_district',
             'shipping_address', 'shipping_cost', 'subtotal_items',
-            'total_amount', 'status', 'tracking_number', 'notes',
-            'created_at', 'items'
+            'total_amount', 'status', 'assigned_admin', 'shipping_courier', 'tracking_number',
+            'tracking_receipt_url', 'notes', 'created_at', 'items'
         ]
+
+    def get_tracking_receipt_url(self, obj):
+        if obj.tracking_receipt_image:
+            try:
+                return obj.tracking_receipt_image.url
+            except Exception:
+                return None
+        return None
 
 
 class OrderItemInputSerializer(serializers.Serializer):

@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Navbar from '@/components/Navbar';
+import { getTrackingHelpWhatsAppLink } from '@/lib/api';
 
 interface OrderItemDetail {
   id: number;
@@ -13,6 +14,13 @@ interface OrderItemDetail {
   quantity: number;
   unit_price: string | number;
   subtotal: string | number;
+}
+
+interface RelatedOrderSummary {
+  order_number: string;
+  status: string;
+  total_amount: string | number;
+  created_at: string;
 }
 
 interface OrderDetailResponse {
@@ -28,12 +36,17 @@ interface OrderDetailResponse {
   subtotal_items: string | number;
   total_amount: string | number;
   status: 'PENDING' | 'CONFIRMED' | 'SHIPPED' | 'COMPLETED' | 'CANCELLED';
+  shipping_courier?: string;
   tracking_number?: string;
+  tracking_receipt_url?: string | null;
   notes?: string;
   created_at: string;
   updated_at?: string;
   items: OrderItemDetail[];
+  related_orders?: RelatedOrderSummary[];
 }
+
+const RECENT_ORDERS_KEY = 'dlrs_recent_orders_v1';
 
 function LacakPesananContent() {
   const searchParams = useSearchParams();
@@ -41,6 +54,9 @@ function LacakPesananContent() {
 
   const [orderQuery, setOrderQuery] = useState(initialOrder);
   const [orderData, setOrderData] = useState<OrderDetailResponse | null>(null);
+  const [recentOrders, setRecentOrders] = useState<
+    { order_number: string; customer_name?: string; total_amount?: string | number; created_at?: string }[]
+  >([]);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copiedResi, setCopiedResi] = useState(false);
@@ -53,10 +69,12 @@ function LacakPesananContent() {
     setErrorMsg(null);
 
     try {
-      const res = await fetch(`/api/orders/${cleanCode}/`);
+      const res = await fetch(`/api/orders/${encodeURIComponent(cleanCode)}/`);
       if (!res.ok) {
         if (res.status === 404) {
-          throw new Error(`Nomor pesanan "${cleanCode}" tidak ditemukan. Pastikan format nomor pesanan sesuai (contoh: ORD-20261017-ABCDE).`);
+          throw new Error(
+            `Pesanan dengan Nomor Pesanan atau Nomor WhatsApp "${cleanCode}" tidak ditemukan. Pastikan nomor yang dimasukkan sesuai.`
+          );
         }
         throw new Error('Terjadi kesalahan saat memuat data pesanan.');
       }
@@ -69,6 +87,22 @@ function LacakPesananContent() {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(RECENT_ORDERS_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          setRecentOrders(parsed);
+          if (!initialOrder && parsed.length > 0 && parsed[0]?.order_number) {
+            setOrderQuery(parsed[0].order_number);
+            fetchOrderDetail(parsed[0].order_number);
+          }
+        }
+      }
+    } catch {}
+  }, []);
 
   useEffect(() => {
     if (initialOrder) {
@@ -109,18 +143,13 @@ function LacakPesananContent() {
   const currentStep = orderData ? getStepProgress(orderData.status) : 0;
   const isCancelled = orderData?.status === 'CANCELLED';
 
-  const sellerPhone = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || '';
-  const waHelpUrl = orderData
-    ? `https://wa.me/${sellerPhone}?text=${encodeURIComponent(
-        `Halo Admin, saya ingin menanyakan status pesanan saya dengan nomor *${orderData.order_number}* atas nama *${orderData.customer_name}*. Terima kasih.`
-      )}`
-    : `https://wa.me/${sellerPhone}`;
+  const waHelpUrl = getTrackingHelpWhatsAppLink(orderData?.order_number, orderData?.customer_name);
 
   return (
     <div className="min-h-screen bg-stone-50 flex flex-col font-sans">
       <Navbar />
 
-      <main className="flex-1 max-w-4xl mx-auto px-4 md:px-8 pt-24 pb-20 w-full space-y-8">
+      <main className="flex-1 max-w-4xl mx-auto px-4 sm:px-6 md:px-8 pt-24 pb-20 w-full space-y-8">
         {/* Header */}
         <div className="text-center space-y-2">
           <p className="text-xs font-bold tracking-[0.2em] uppercase text-stone-400">
@@ -135,7 +164,7 @@ function LacakPesananContent() {
         </div>
 
         {/* Search Bar Form */}
-        <div className="bg-white p-4 sm:p-6 rounded-2xl border border-stone-200/80 shadow-sm">
+        <div className="bg-white p-4 sm:p-6 rounded-2xl border border-stone-200/80 shadow-sm space-y-3">
           <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-3">
             <div className="relative flex-1">
               <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-stone-400">
@@ -144,7 +173,7 @@ function LacakPesananContent() {
               <input
                 type="text"
                 required
-                placeholder="Masukkan Nomor Pesanan (Contoh: ORD-20261017-A1B2C)"
+                placeholder="Ketik Nomor Pesanan (ORD-...) ATAU Nomor WhatsApp Anda (0812...)"
                 value={orderQuery}
                 onChange={(e) => setOrderQuery(e.target.value.toUpperCase())}
                 className="w-full pl-10 pr-4 py-3 rounded-xl border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 uppercase font-mono tracking-wider font-semibold"
@@ -153,7 +182,7 @@ function LacakPesananContent() {
             <button
               type="submit"
               disabled={isLoading || !orderQuery.trim()}
-              className="px-6 py-3 bg-zinc-900 hover:bg-zinc-800 disabled:bg-stone-300 text-white font-semibold rounded-xl text-sm transition-all shadow-sm flex items-center justify-center gap-2"
+              className="px-6 py-3 bg-zinc-900 hover:bg-zinc-800 disabled:bg-stone-300 text-white font-semibold rounded-xl text-sm transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
             >
               {isLoading ? (
                 <span>Mencari...</span>
@@ -165,6 +194,62 @@ function LacakPesananContent() {
               )}
             </button>
           </form>
+
+          <p className="text-[11px] text-stone-500">
+            💡 Lupa kode pesanan? Anda juga dapat langsung mengetikkan <strong>Nomor HP / WhatsApp</strong> yang digunakan saat memesan.
+          </p>
+
+          {/* Recent Orders from this device */}
+          {recentOrders.length > 0 && (
+            <div className="pt-2 border-t border-stone-100 flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-bold text-stone-500 uppercase tracking-wider">
+                Pesanan Terakhir Anda:
+              </span>
+              {recentOrders.map((ro) => (
+                <button
+                  key={ro.order_number}
+                  type="button"
+                  onClick={() => {
+                    setOrderQuery(ro.order_number);
+                    fetchOrderDetail(ro.order_number);
+                  }}
+                  className={`px-3 py-1 rounded-full text-xs font-mono font-bold border transition-all cursor-pointer ${
+                    orderData?.order_number === ro.order_number
+                      ? 'bg-zinc-900 text-white border-zinc-900 shadow-xs'
+                      : 'bg-stone-50 text-zinc-800 border-stone-300 hover:border-zinc-900'
+                  }`}
+                >
+                  {ro.order_number}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Related Orders when searched by phone number */}
+          {orderData?.related_orders && orderData.related_orders.length > 1 && (
+            <div className="pt-2 border-t border-stone-100 flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider">
+                Daftar Pesanan Nomor WA Ini ({orderData.related_orders.length}):
+              </span>
+              {orderData.related_orders.map((rel) => (
+                <button
+                  key={rel.order_number}
+                  type="button"
+                  onClick={() => {
+                    setOrderQuery(rel.order_number);
+                    fetchOrderDetail(rel.order_number);
+                  }}
+                  className={`px-3 py-1 rounded-full text-xs font-mono font-bold border transition-all cursor-pointer ${
+                    orderData.order_number === rel.order_number
+                      ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs'
+                      : 'bg-emerald-50 text-emerald-900 border-emerald-200 hover:bg-emerald-100'
+                  }`}
+                >
+                  {rel.order_number}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Error Notification */}
@@ -306,27 +391,74 @@ function LacakPesananContent() {
               </div>
             )}
 
-            {/* Tracking Number Banner (if shipped) */}
-            {orderData.tracking_number && (
-              <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">🚚</span>
-                  <div>
-                    <p className="text-xs text-purple-700 font-semibold uppercase tracking-wider">
-                      Nomor Resi Pengiriman Kurir:
-                    </p>
-                    <p className="text-base font-bold text-purple-950 font-mono tracking-wider">
-                      {orderData.tracking_number}
-                    </p>
+            {/* Tracking Number & Receipt Photo Banner (if shipped or available) */}
+            {(orderData.tracking_number || orderData.tracking_receipt_url) && (
+              <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">🚚</span>
+                    <div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <p className="text-xs text-purple-700 font-semibold uppercase tracking-wider">
+                          Nomor Resi Pengiriman Kurir:
+                        </p>
+                        {orderData.shipping_courier && (
+                          <span className="px-2 py-0.5 rounded-md bg-purple-700 text-white font-extrabold text-[10px] uppercase tracking-wider">
+                            {orderData.shipping_courier}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-base font-bold text-purple-950 font-mono tracking-wider mt-0.5">
+                        {orderData.tracking_number || 'Lihat pada Foto Bukti Struk Resi'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {orderData.tracking_number && (
+                      <button
+                        type="button"
+                        onClick={() => handleCopyResi(orderData.tracking_number!)}
+                        className="px-3.5 py-1.5 bg-white border border-purple-300 text-purple-900 hover:bg-purple-100 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+                      >
+                        {copiedResi ? <span>✓ Tersalin!</span> : <span>📋 Salin No. Resi</span>}
+                      </button>
+                    )}
+                    {orderData.tracking_receipt_url && (
+                      <a
+                        href={orderData.tracking_receipt_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3.5 py-1.5 bg-purple-700 hover:bg-purple-800 text-white rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5"
+                      >
+                        <span>🧾</span>
+                        <span>Buka Foto Struk Resi</span>
+                      </a>
+                    )}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => handleCopyResi(orderData.tracking_number!)}
-                  className="px-3.5 py-1.5 bg-white border border-purple-300 text-purple-900 hover:bg-purple-100 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5"
-                >
-                  {copiedResi ? <span>✓ Tersalin!</span> : <span>Salin No. Resi</span>}
-                </button>
+
+                {orderData.tracking_receipt_url && (
+                  <div className="pt-2 border-t border-purple-200/70 flex items-center gap-3">
+                    <a
+                      href={orderData.tracking_receipt_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block w-16 h-16 rounded-lg overflow-hidden border border-purple-300 bg-white shrink-0 hover:opacity-90 transition-opacity"
+                    >
+                      <img
+                        src={orderData.tracking_receipt_url}
+                        alt="Foto Struk Resi"
+                        className="w-full h-full object-cover"
+                      />
+                    </a>
+                    <div className="text-xs text-purple-900">
+                      <p className="font-bold">Foto Bukti Struk Resi Ekspedisi Terlampir</p>
+                      <p className="text-[11px] text-purple-700">
+                        Klik foto atau tombol &ldquo;Buka Foto Struk Resi&rdquo; untuk memperbesar bukti pengiriman paket Anda.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -364,9 +496,9 @@ function LacakPesananContent() {
                     </span>
                   </div>
                   <div className="flex justify-between text-stone-600">
-                    <span>Daerah Pengiriman:</span>
+                    <span>Ongkos Kirim ({orderData.shipping_province}):</span>
                     <span className="font-semibold text-zinc-900">
-                      {orderData.shipping_province}
+                      Rp {Number(orderData.shipping_cost || 0).toLocaleString('id-ID')}
                     </span>
                   </div>
                   <div className="divider my-1" />

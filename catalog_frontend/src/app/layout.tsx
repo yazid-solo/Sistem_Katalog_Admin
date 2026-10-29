@@ -1,6 +1,12 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter, Playfair_Display } from 'next/font/google';
 import './globals.css';
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+};
 
 const inter = Inter({
   subsets: ['latin'],
@@ -16,14 +22,14 @@ const playfair = Playfair_Display({
 
 export const metadata: Metadata = {
   title: {
-    default: 'Katalog Pakaian Premium',
-    template: '%s | Katalog Pakaian Premium',
+    default: 'DLRS — Katalog Pakaian Harian, Santai & Muslimah',
+    template: '%s | DLRS Katalog Pakaian',
   },
-  description: 'Koleksi pakaian premium dengan kualitas terbaik. Temukan pilihan kemeja, dress, outer, dan aksesoris pilihan.',
-  keywords: ['pakaian premium', 'fashion', 'baju wanita', 'katalog pakaian', 'quiet luxury'],
+  description: 'Koleksi lengkap Daster, Kulot, Kulot Polos, Celana Pendek, Bogo, Kaos, Setelan Panjang/Pendek, Setelan Anak, Outer, Kain Pantai, Mukena, dan Hijab.',
+  keywords: ['daster', 'kulot', 'kulot polos', 'celana pendek', 'celana bogo', 'kaos', 'setelan harian', 'setelan anak', 'outer', 'kain pantai', 'mukena', 'hijab', 'katalog pakaian'],
   openGraph: {
-    title: 'Katalog Pakaian Premium',
-    description: 'Koleksi pakaian premium dengan kualitas terbaik.',
+    title: 'DLRS — Katalog Pakaian Harian, Santai & Muslimah',
+    description: 'Koleksi lengkap Daster, Kulot, Kulot Polos, Setelan Dewasa & Anak, Celana Pendek, Bogo, Kaos, Outer, Kain Pantai, Mukena & Hijab.',
     type: 'website',
   },
 };

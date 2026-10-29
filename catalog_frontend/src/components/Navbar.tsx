@@ -39,21 +39,24 @@ export default function Navbar() {
         </Link>
 
         {/* Nav Links — Desktop */}
-        <div className="hidden lg:flex items-center gap-7 text-xs font-semibold tracking-wider uppercase text-stone-600">
+        <div className="hidden lg:flex items-center gap-5 xl:gap-6 text-xs font-semibold tracking-wider uppercase text-stone-600">
           <Link href="/" className="hover:text-stone-900 transition-colors py-1">
             Semua Koleksi
           </Link>
-          <Link href="/?category=kemeja" className="hover:text-stone-900 transition-colors py-1">
-            Kemeja
+          <Link href="/?category=daster" className="hover:text-stone-900 transition-colors py-1">
+            Daster
           </Link>
-          <Link href="/?category=celana" className="hover:text-stone-900 transition-colors py-1">
-            Celana
+          <Link href="/?category=kulot" className="hover:text-stone-900 transition-colors py-1">
+            Kulot
           </Link>
-          <Link href="/?category=dress" className="hover:text-stone-900 transition-colors py-1">
-            Dress
+          <Link href="/?category=setelan" className="hover:text-stone-900 transition-colors py-1">
+            Setelan
           </Link>
-          <Link href="/?category=outer" className="hover:text-stone-900 transition-colors py-1">
-            Outerwear
+          <Link href="/?category=celana-pendek-bogo" className="hover:text-stone-900 transition-colors py-1">
+            Celana & Bogo
+          </Link>
+          <Link href="/?category=mukena-hijab" className="hover:text-stone-900 transition-colors py-1">
+            Mukena & Hijab
           </Link>
           <Link
             href="/lacak-pesanan"

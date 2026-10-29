@@ -17,14 +17,14 @@ from django.utils.text import slugify
 # ─────────────────────────────────────────
 class Category(models.Model):
     """
-    Top-level product category (e.g., Kemeja, Celana, Dress).
+    Top-level product category (e.g., Daster, Kulot, Setelan, Mukena & Hijab).
     The slug is auto-generated from name and used in URLs.
     """
     name = models.CharField(
         max_length=100,
         unique=True,
         verbose_name="Nama Kategori",
-        help_text="Contoh: Kemeja, Celana, Dress, Outer"
+        help_text="Contoh: Daster, Kulot, Celana Pendek & Bogo, Setelan, Mukena & Hijab"
     )
     slug = models.SlugField(
         max_length=100,
@@ -55,13 +55,13 @@ class Category(models.Model):
 # ─────────────────────────────────────────
 class Product(models.Model):
     """
-    A single clothing product (e.g., "Kemeja Linen Premium Putih").
+    A single clothing product (e.g., "Daster Rayon Premium Busui").
     One product can have multiple images and multiple size/color variants.
     """
     title = models.CharField(
         max_length=200,
         verbose_name="Nama Produk",
-        help_text="Nama lengkap produk, misal: Kemeja Linen Premium Putih"
+        help_text="Nama lengkap produk, misal: Daster Rayon Premium Busui / Kulot Crinkle Airflow"
     )
     description = models.TextField(
         blank=True,
@@ -241,9 +241,12 @@ class Variant(models.Model):
     A specific purchasable variant of a product (size + color combination).
     This is where stock is tracked.
 
-    Example: "Kemeja Linen Premium" → Size: L, Color: Putih, Stock: 12
+    Example: "Daster Rayon Premium Busui" → Size: ALL SIZE, Color: Motif Bunga Dusty, Stock: 15
     """
     SIZE_CHOICES = [
+        ('ALL SIZE', 'All Size'),
+        ('STANDAR', 'Standar'),
+        ('JUMBO', 'Jumbo'),
         ('XS', 'XS'),
         ('S', 'S'),
         ('M', 'M'),
@@ -255,8 +258,9 @@ class Variant(models.Model):
     ]
 
     SIZE_SORT_ORDER = {
-        'XS': 0, 'S': 1, 'M': 2, 'L': 3,
-        'XL': 4, 'XXL': 5, 'XXXL': 6, 'FREE_SIZE': 99
+        'ALL SIZE': 0, 'FREE_SIZE': 1, 'STANDAR': 2, 'JUMBO': 3,
+        'XS': 4, 'S': 5, 'M': 6, 'L': 7,
+        'XL': 8, 'XXL': 9, 'XXXL': 10
     }
 
     product = models.ForeignKey(
@@ -274,8 +278,8 @@ class Variant(models.Model):
     color = models.CharField(
         max_length=100,
         db_index=True,
-        verbose_name="Warna",
-        help_text="Nama warna, misal: Putih Susu, Navy, Sage Green"
+        verbose_name="Warna / Motif",
+        help_text="Nama warna atau motif, misal: Hitam, Sage Green, Krem Susu, Motif Bunga"
     )
     sku = models.CharField(
         max_length=50,
@@ -319,7 +323,7 @@ class Variant(models.Model):
         null=True,
         blank=True,
         verbose_name="Lingkar Pinggang (cm)",
-        help_text="Opsional untuk celana/rok, misal: 68, 72, 76"
+        help_text="Opsional untuk kulot/celana/bogo/mukena, misal: 68, 72, 100"
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -338,7 +342,16 @@ class Variant(models.Model):
         # Auto-generate SKU if not provided
         if not self.sku:
             product_code = self.product.slug[:8].upper().replace('-', '')
-            self.sku = f"{product_code}-{self.size}-{self.color[:3].upper()}"
+            color_clean = ''.join(c for c in self.color.upper() if c.isalnum())
+            color_code = (color_clean[:3] + color_clean[-2:]) if len(color_clean) > 4 else color_clean[:4]
+            size_code = self.size.replace(' ', '')[:4].upper()
+            base_sku = f"{product_code}-{size_code}-{color_code}"
+            sku = base_sku
+            counter = 1
+            while Variant.objects.filter(sku=sku).exclude(pk=self.pk).exists():
+                sku = f"{base_sku}-{counter}"
+                counter += 1
+            self.sku = sku
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -353,23 +366,133 @@ class Variant(models.Model):
     def availability_label(self):
         if self.stock_quantity == 0:
             return "Habis"
-        elif self.stock_quantity <= 3:
+        elif self.stock_quantity <= 5:
             return "Sisa Sedikit"
         return "Tersedia"
 
     @property
     def effective_measurements(self):
-        STANDARDS = {
-            'XS': {'ld': 92, 'pb': 68, 'bahu': 40, 'lengan': 56, 'lp': 64, 'bb': '40-48 kg'},
-            'S': {'ld': 96, 'pb': 70, 'bahu': 42, 'lengan': 57, 'lp': 68, 'bb': '48-55 kg'},
-            'M': {'ld': 100, 'pb': 72, 'bahu': 44, 'lengan': 58, 'lp': 72, 'bb': '55-65 kg'},
-            'L': {'ld': 106, 'pb': 74, 'bahu': 46, 'lengan': 59, 'lp': 78, 'bb': '65-75 kg'},
-            'XL': {'ld': 112, 'pb': 76, 'bahu': 48, 'lengan': 60, 'lp': 84, 'bb': '75-85 kg'},
-            'XXL': {'ld': 118, 'pb': 78, 'bahu': 50, 'lengan': 61, 'lp': 90, 'bb': '85-95 kg'},
-            'XXXL': {'ld': 124, 'pb': 80, 'bahu': 52, 'lengan': 62, 'lp': 96, 'bb': '95-105 kg'},
-            'FREE_SIZE': {'ld': 104, 'pb': 73, 'bahu': 45, 'lengan': 58, 'lp': 74, 'bb': 'All Size'},
-        }
-        std = STANDARDS.get(self.size, STANDARDS['M'])
+        cat_slug = self.product.category.slug.lower() if self.product and self.product.category else ''
+        title_lower = self.product.title.lower() if self.product else ''
+        size_key = self.size.upper()
+
+        # 1. Setelan Anak (Kids 1-10 Years)
+        if 'anak' in cat_slug or 'anak' in title_lower:
+            KIDS_STD = {
+                'ALL SIZE': {'ld': 72, 'pb': 46, 'bahu': 30, 'lengan': 16, 'lp': 60, 'bb': '12-22 kg (Anak 2-6 Thn)'},
+                'FREE_SIZE': {'ld': 72, 'pb': 46, 'bahu': 30, 'lengan': 16, 'lp': 60, 'bb': '12-22 kg (Anak 2-6 Thn)'},
+                'STANDAR': {'ld': 70, 'pb': 45, 'bahu': 29, 'lengan': 15, 'lp': 58, 'bb': '12-20 kg (Anak 2-5 Thn)'},
+                'JUMBO': {'ld': 84, 'pb': 54, 'bahu': 35, 'lengan': 19, 'lp': 70, 'bb': '22-32 kg (Anak 6-10 Thn)'},
+                'XS': {'ld': 60, 'pb': 39, 'bahu': 25, 'lengan': 13, 'lp': 48, 'bb': '8-11 kg (Anak 1 Thn)'},
+                'S': {'ld': 64, 'pb': 42, 'bahu': 27, 'lengan': 14, 'lp': 52, 'bb': '10-14 kg (Anak 1-2 Thn)'},
+                'M': {'ld': 70, 'pb': 45, 'bahu': 29, 'lengan': 15, 'lp': 56, 'bb': '14-18 kg (Anak 3-4 Thn)'},
+                'L': {'ld': 76, 'pb': 48, 'bahu': 31, 'lengan': 16, 'lp': 62, 'bb': '18-22 kg (Anak 5-6 Thn)'},
+                'XL': {'ld': 82, 'pb': 52, 'bahu': 33, 'lengan': 18, 'lp': 66, 'bb': '22-27 kg (Anak 7-8 Thn)'},
+                'XXL': {'ld': 86, 'pb': 55, 'bahu': 35, 'lengan': 19, 'lp': 72, 'bb': '27-33 kg (Anak 9-10 Thn)'},
+                'XXXL': {'ld': 90, 'pb': 58, 'bahu': 37, 'lengan': 20, 'lp': 76, 'bb': '33-38 kg (Anak 10-12 Thn)'},
+            }
+            std = KIDS_STD.get(size_key, KIDS_STD['ALL SIZE'])
+        # 2. Hijab / Kerudung
+        elif any(k in title_lower for k in ['hijab', 'kerudung', 'pashmina', 'segi empat']):
+            HIJAB_STD = {
+                'ALL SIZE': {'ld': 115, 'pb': 115, 'bahu': 0, 'lengan': 0, 'lp': 0, 'bb': 'Ukuran Standar Reguler (115×115 cm)'},
+                'FREE_SIZE': {'ld': 115, 'pb': 115, 'bahu': 0, 'lengan': 0, 'lp': 0, 'bb': 'Ukuran Standar Reguler (115×115 cm)'},
+                'STANDAR': {'ld': 115, 'pb': 115, 'bahu': 0, 'lengan': 0, 'lp': 0, 'bb': 'Reguler Tegak Dahi (115×115 cm)'},
+                'JUMBO': {'ld': 130, 'pb': 130, 'bahu': 0, 'lengan': 0, 'lp': 0, 'bb': 'Syar\'i Menutup Dada (130×130 cm)'},
+                'S': {'ld': 110, 'pb': 110, 'bahu': 0, 'lengan': 0, 'lp': 0, 'bb': 'Compact / Remaja (110×110 cm)'},
+                'M': {'ld': 115, 'pb': 115, 'bahu': 0, 'lengan': 0, 'lp': 0, 'bb': 'Reguler Harian (115×115 cm)'},
+                'L': {'ld': 120, 'pb': 120, 'bahu': 0, 'lengan': 0, 'lp': 0, 'bb': 'Medium Syar\'i (120×120 cm)'},
+                'XL': {'ld': 125, 'pb': 125, 'bahu': 0, 'lengan': 0, 'lp': 0, 'bb': 'Lebar Syar\'i (125×125 cm)'},
+                'XXL': {'ld': 130, 'pb': 130, 'bahu': 0, 'lengan': 0, 'lp': 0, 'bb': 'Jumbo Syar\'i (130×130 cm)'},
+            }
+            std = HIJAB_STD.get(size_key, HIJAB_STD['ALL SIZE'])
+        # 3. Kain Pantai
+        elif 'kain pantai' in title_lower or 'kain-pantai' in cat_slug:
+            PANTAI_STD = {
+                'ALL SIZE': {'ld': 120, 'pb': 180, 'bahu': 0, 'lengan': 0, 'lp': 0, 'bb': '40-90 kg (Fleksibel / Multifungsi)'},
+                'FREE_SIZE': {'ld': 120, 'pb': 180, 'bahu': 0, 'lengan': 0, 'lp': 0, 'bb': '40-90 kg (Fleksibel / Multifungsi)'},
+                'STANDAR': {'ld': 115, 'pb': 175, 'bahu': 0, 'lengan': 0, 'lp': 0, 'bb': '40-75 kg (Standar Bali)'},
+                'JUMBO': {'ld': 125, 'pb': 190, 'bahu': 0, 'lengan': 0, 'lp': 0, 'bb': '65-100 kg (Lebar Jumbo)'},
+                'S': {'ld': 115, 'pb': 165, 'bahu': 0, 'lengan': 0, 'lp': 0, 'bb': '40-55 kg'},
+                'M': {'ld': 115, 'pb': 170, 'bahu': 0, 'lengan': 0, 'lp': 0, 'bb': '50-65 kg'},
+                'L': {'ld': 120, 'pb': 180, 'bahu': 0, 'lengan': 0, 'lp': 0, 'bb': '60-75 kg'},
+                'XL': {'ld': 120, 'pb': 185, 'bahu': 0, 'lengan': 0, 'lp': 0, 'bb': '70-85 kg'},
+                'XXL': {'ld': 125, 'pb': 190, 'bahu': 0, 'lengan': 0, 'lp': 0, 'bb': '80-100 kg'},
+            }
+            std = PANTAI_STD.get(size_key, PANTAI_STD['ALL SIZE'])
+        # 4. Mukena
+        elif 'mukena' in title_lower or 'mukena' in cat_slug:
+            MUKENA_STD = {
+                'ALL SIZE': {'ld': 125, 'pb': 118, 'bahu': 0, 'lengan': 0, 'lp': 130, 'bb': '45-80 kg (Tinggi Maks 168 cm)'},
+                'FREE_SIZE': {'ld': 125, 'pb': 118, 'bahu': 0, 'lengan': 0, 'lp': 130, 'bb': '45-80 kg (Tinggi Maks 168 cm)'},
+                'STANDAR': {'ld': 122, 'pb': 115, 'bahu': 0, 'lengan': 0, 'lp': 125, 'bb': '45-70 kg (Tinggi Maks 165 cm)'},
+                'JUMBO': {'ld': 130, 'pb': 122, 'bahu': 0, 'lengan': 0, 'lp': 145, 'bb': '65-95 kg (Tinggi Maks 175 cm)'},
+                'S': {'ld': 118, 'pb': 112, 'bahu': 0, 'lengan': 0, 'lp': 120, 'bb': '42-55 kg'},
+                'M': {'ld': 122, 'pb': 115, 'bahu': 0, 'lengan': 0, 'lp': 125, 'bb': '50-65 kg'},
+                'L': {'ld': 125, 'pb': 118, 'bahu': 0, 'lengan': 0, 'lp': 130, 'bb': '60-75 kg'},
+                'XL': {'ld': 128, 'pb': 120, 'bahu': 0, 'lengan': 0, 'lp': 138, 'bb': '70-85 kg'},
+                'XXL': {'ld': 130, 'pb': 122, 'bahu': 0, 'lengan': 0, 'lp': 145, 'bb': '80-95 kg'},
+            }
+            std = MUKENA_STD.get(size_key, MUKENA_STD['ALL SIZE'])
+        # 5. Kulot / Kulot Polos
+        elif 'kulot' in cat_slug or 'kulot' in title_lower:
+            KULOT_STD = {
+                'ALL SIZE': {'ld': 0, 'pb': 95, 'bahu': 0, 'lengan': 0, 'lp': 105, 'bb': '45-70 kg (All Size)'},
+                'FREE_SIZE': {'ld': 0, 'pb': 95, 'bahu': 0, 'lengan': 0, 'lp': 105, 'bb': '45-70 kg (All Size)'},
+                'STANDAR': {'ld': 0, 'pb': 94, 'bahu': 0, 'lengan': 0, 'lp': 102, 'bb': '45-65 kg'},
+                'JUMBO': {'ld': 0, 'pb': 97, 'bahu': 0, 'lengan': 0, 'lp': 120, 'bb': '65-90 kg'},
+                'S': {'ld': 0, 'pb': 92, 'bahu': 0, 'lengan': 0, 'lp': 94, 'bb': '42-52 kg'},
+                'M': {'ld': 0, 'pb': 94, 'bahu': 0, 'lengan': 0, 'lp': 100, 'bb': '50-60 kg'},
+                'L': {'ld': 0, 'pb': 95, 'bahu': 0, 'lengan': 0, 'lp': 106, 'bb': '58-68 kg'},
+                'XL': {'ld': 0, 'pb': 96, 'bahu': 0, 'lengan': 0, 'lp': 112, 'bb': '68-78 kg'},
+                'XXL': {'ld': 0, 'pb': 97, 'bahu': 0, 'lengan': 0, 'lp': 120, 'bb': '78-90 kg'},
+            }
+            std = KULOT_STD.get(size_key, KULOT_STD['ALL SIZE'])
+        # 6. Celana Pendek & Bogo
+        elif any(k in cat_slug for k in ['celana', 'bogo']) or any(k in title_lower for k in ['celana', 'bogo']):
+            SHORTS_STD = {
+                'ALL SIZE': {'ld': 0, 'pb': 45, 'bahu': 0, 'lengan': 0, 'lp': 105, 'bb': '45-72 kg (All Size)'},
+                'FREE_SIZE': {'ld': 0, 'pb': 45, 'bahu': 0, 'lengan': 0, 'lp': 105, 'bb': '45-72 kg (All Size)'},
+                'STANDAR': {'ld': 0, 'pb': 44, 'bahu': 0, 'lengan': 0, 'lp': 102, 'bb': '45-65 kg'},
+                'JUMBO': {'ld': 0, 'pb': 48, 'bahu': 0, 'lengan': 0, 'lp': 118, 'bb': '65-90 kg'},
+                'S': {'ld': 0, 'pb': 42, 'bahu': 0, 'lengan': 0, 'lp': 94, 'bb': '42-52 kg'},
+                'M': {'ld': 0, 'pb': 44, 'bahu': 0, 'lengan': 0, 'lp': 100, 'bb': '50-60 kg'},
+                'L': {'ld': 0, 'pb': 46, 'bahu': 0, 'lengan': 0, 'lp': 106, 'bb': '58-68 kg'},
+                'XL': {'ld': 0, 'pb': 47, 'bahu': 0, 'lengan': 0, 'lp': 112, 'bb': '68-78 kg'},
+                'XXL': {'ld': 0, 'pb': 48, 'bahu': 0, 'lengan': 0, 'lp': 118, 'bb': '78-90 kg'},
+            }
+            std = SHORTS_STD.get(size_key, SHORTS_STD['ALL SIZE'])
+        # 7. Daster
+        elif 'daster' in cat_slug or 'daster' in title_lower:
+            DASTER_STD = {
+                'ALL SIZE': {'ld': 112, 'pb': 115, 'bahu': 44, 'lengan': 22, 'lp': 115, 'bb': '45-75 kg (All Size)'},
+                'FREE_SIZE': {'ld': 112, 'pb': 115, 'bahu': 44, 'lengan': 22, 'lp': 115, 'bb': '45-75 kg (All Size)'},
+                'STANDAR': {'ld': 110, 'pb': 114, 'bahu': 43, 'lengan': 21, 'lp': 112, 'bb': '45-68 kg'},
+                'JUMBO': {'ld': 125, 'pb': 118, 'bahu': 48, 'lengan': 25, 'lp': 128, 'bb': '68-95 kg'},
+                'S': {'ld': 100, 'pb': 110, 'bahu': 40, 'lengan': 19, 'lp': 104, 'bb': '42-52 kg'},
+                'M': {'ld': 106, 'pb': 112, 'bahu': 42, 'lengan': 20, 'lp': 108, 'bb': '50-60 kg'},
+                'L': {'ld': 112, 'pb': 115, 'bahu': 44, 'lengan': 22, 'lp': 114, 'bb': '60-70 kg'},
+                'XL': {'ld': 118, 'pb': 116, 'bahu': 46, 'lengan': 23, 'lp': 120, 'bb': '70-82 kg'},
+                'XXL': {'ld': 125, 'pb': 118, 'bahu': 48, 'lengan': 25, 'lp': 128, 'bb': '80-95 kg'},
+            }
+            std = DASTER_STD.get(size_key, DASTER_STD['ALL SIZE'])
+        # 8. Setelan Dewasa & Kaos / Outer
+        else:
+            STANDARDS = {
+                'ALL SIZE': {'ld': 110, 'pb': 70, 'bahu': 45, 'lengan': 40, 'lp': 106, 'bb': '45-72 kg (All Size)'},
+                'FREE_SIZE': {'ld': 110, 'pb': 70, 'bahu': 45, 'lengan': 40, 'lp': 106, 'bb': '45-72 kg (All Size)'},
+                'STANDAR': {'ld': 106, 'pb': 68, 'bahu': 43, 'lengan': 38, 'lp': 102, 'bb': '45-65 kg'},
+                'JUMBO': {'ld': 120, 'pb': 74, 'bahu': 49, 'lengan': 44, 'lp': 120, 'bb': '65-92 kg'},
+                'XS': {'ld': 92, 'pb': 64, 'bahu': 39, 'lengan': 20, 'lp': 90, 'bb': '40-48 kg'},
+                'S': {'ld': 96, 'pb': 66, 'bahu': 41, 'lengan': 21, 'lp': 94, 'bb': '45-55 kg'},
+                'M': {'ld': 102, 'pb': 68, 'bahu': 43, 'lengan': 22, 'lp': 100, 'bb': '52-62 kg'},
+                'L': {'ld': 108, 'pb': 70, 'bahu': 45, 'lengan': 23, 'lp': 106, 'bb': '60-70 kg'},
+                'XL': {'ld': 114, 'pb': 72, 'bahu': 47, 'lengan': 24, 'lp': 112, 'bb': '70-80 kg'},
+                'XXL': {'ld': 120, 'pb': 74, 'bahu': 49, 'lengan': 25, 'lp': 120, 'bb': '80-92 kg'},
+                'XXXL': {'ld': 126, 'pb': 76, 'bahu': 51, 'lengan': 26, 'lp': 126, 'bb': '90-105 kg'},
+            }
+            std = STANDARDS.get(size_key, STANDARDS['ALL SIZE'])
+
         return {
             'chest_width': self.chest_width or std['ld'],
             'body_length': self.body_length or std['pb'],
@@ -382,9 +505,16 @@ class Variant(models.Model):
     @property
     def measurements_display(self):
         m = self.effective_measurements
-        cat_slug = self.product.category.slug if self.product and self.product.category else ''
-        if 'celana' in cat_slug or 'rok' in cat_slug:
-            return f"LP: {m['waist_width']} cm · Panjang: {m['body_length']} cm"
+        cat_slug = self.product.category.slug.lower() if self.product and self.product.category else ''
+        title_lower = self.product.title.lower() if self.product else ''
+        if any(k in title_lower for k in ['kain pantai', 'hijab', 'kerudung', 'pashmina', 'segi empat']) or 'kain-pantai' in cat_slug:
+            return f"Panjang: {m['body_length']} cm · Lebar: {m['chest_width']} cm"
+        if 'mukena' in title_lower or 'mukena' in cat_slug:
+            return f"Panjang Atasan: {m['chest_width']} cm · Panjang Rok: {m['body_length']} cm · LP: {m['waist_width']} cm"
+        if any(k in cat_slug for k in ['celana', 'kulot', 'bogo', 'rok']) or any(k in title_lower for k in ['kulot', 'celana', 'bogo']):
+            return f"LP (Melar): {m['waist_width']} cm · Panjang: {m['body_length']} cm"
+        if 'setelan' in cat_slug or 'setelan' in title_lower:
+            return f"LD: {m['chest_width']} cm · PB: {m['body_length']} cm · LP Celana: {m['waist_width']} cm"
         return f"LD: {m['chest_width']} cm · PB: {m['body_length']} cm · Bahu: {m['shoulder_width']} cm"
 
 
@@ -507,11 +637,32 @@ class Order(models.Model):
         db_index=True,
         verbose_name="Status Pesanan"
     )
+    assigned_admin = models.CharField(
+        max_length=50,
+        blank=True,
+        default='',
+        verbose_name="Admin yang Ditugaskan",
+        help_text="Admin WhatsApp yang ditugaskan untuk pesanan ini (misal: Admin 1 / Admin 2)"
+    )
+    shipping_courier = models.CharField(
+        max_length=50,
+        blank=True,
+        default='',
+        verbose_name="Nama Ekspedisi Kurir",
+        help_text="Contoh: JNE, J&T Express, SiCepat, SPX, Pos Indonesia, AnterAja"
+    )
     tracking_number = models.CharField(
         max_length=100,
         blank=True,
         verbose_name="No. Resi Kurir",
         help_text="Contoh: JNE012345678, JP87654321"
+    )
+    tracking_receipt_image = models.ImageField(
+        upload_to='receipts/%Y/%m/',
+        blank=True,
+        null=True,
+        verbose_name="Foto Struk Resi",
+        help_text="Foto bukti struk resi pengiriman dari ekspedisi"
     )
     notes = models.TextField(
         blank=True,

@@ -13,13 +13,13 @@ interface FilterBarProps {
   currentMaxPrice?: string;
 }
 
-const SIZE_OPTIONS = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
+const SIZE_OPTIONS = ['ALL SIZE', 'STANDAR', 'JUMBO', 'S', 'M', 'L', 'XL', 'XXL'];
 const PRICE_PRESETS = [
   { label: 'Semua Harga', min: '', max: '' },
-  { label: '< Rp 100rb', min: '', max: '100000' },
-  { label: 'Rp 100–200rb', min: '100000', max: '200000' },
-  { label: 'Rp 200–350rb', min: '200000', max: '350000' },
-  { label: '> Rp 350rb', min: '350000', max: '' },
+  { label: '< Rp 35rb', min: '', max: '35000' },
+  { label: 'Rp 35rb–75rb', min: '35000', max: '75000' },
+  { label: 'Rp 75rb–150rb', min: '75000', max: '150000' },
+  { label: '> Rp 150rb', min: '150000', max: '' },
 ];
 
 export default function FilterBar({
@@ -108,7 +108,7 @@ export default function FilterBar({
             <input
               id="search-products"
               type="search"
-              placeholder="Cari pakaian, kemeja, warna..."
+              placeholder="Cari daster, kulot, bogo, setelan, mukena, hijab..."
               value={searchInput}
               onChange={(e) => handleSearchChange(e.target.value)}
               className="w-full pl-10 pr-8 py-2.5 rounded-full border border-stone-300/90 text-xs bg-white text-stone-900 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-900 focus:border-stone-900 transition-all shadow-2xs font-medium"
@@ -187,51 +187,49 @@ export default function FilterBar({
           )}
         </div>
 
-        {/* ── Category & Size Selector Row ── */}
-        <div className="flex items-center gap-3 py-2.5 overflow-x-auto scrollbar-hide">
-          {/* Category Chips */}
-          <div className="flex items-center gap-2 shrink-0">
+        {/* ── Category Chips Row (Jenis Produk) ── */}
+        <div className="flex items-center gap-2 pt-1.5 pb-2 overflow-x-auto scrollbar-hide">
+          <button
+            id="filter-all-categories"
+            onClick={() => updateFilter({ category: null })}
+            className={`text-xs font-semibold tracking-wider uppercase px-4 py-2 shrink-0 transition-all duration-200 rounded-full border shadow-2xs ${
+              !currentCategory
+                ? 'bg-stone-900 text-white border-stone-900'
+                : 'border-stone-300/80 text-stone-600 hover:border-stone-900 hover:text-stone-900 bg-white'
+            }`}
+          >
+            Semua
+          </button>
+          {categories.map((cat) => (
             <button
-              id="filter-all-categories"
-              onClick={() => updateFilter({ category: null })}
-              className={`text-xs font-semibold tracking-wider uppercase px-4 py-2 transition-all duration-200 rounded-full border shadow-2xs ${
-                !currentCategory
+              key={cat.id}
+              id={`filter-category-${cat.slug}`}
+              onClick={() => updateFilter({ category: currentCategory === cat.slug ? null : cat.slug })}
+              className={`text-xs font-semibold tracking-wider uppercase px-4 py-2 shrink-0 whitespace-nowrap transition-all duration-200 rounded-full border shadow-2xs ${
+                currentCategory === cat.slug
                   ? 'bg-stone-900 text-white border-stone-900'
                   : 'border-stone-300/80 text-stone-600 hover:border-stone-900 hover:text-stone-900 bg-white'
               }`}
             >
-              Semua
+              {cat.name}
             </button>
-            {categories.map((cat) => (
-              <button
-                key={cat.id}
-                id={`filter-category-${cat.slug}`}
-                onClick={() => updateFilter({ category: currentCategory === cat.slug ? null : cat.slug })}
-                className={`text-xs font-semibold tracking-wider uppercase px-4 py-2 whitespace-nowrap transition-all duration-200 rounded-full border shadow-2xs ${
-                  currentCategory === cat.slug
-                    ? 'bg-stone-900 text-white border-stone-900'
-                    : 'border-stone-300/80 text-stone-600 hover:border-stone-900 hover:text-stone-900 bg-white'
-                }`}
-              >
-                {cat.name}
-              </button>
-            ))}
-          </div>
+          ))}
+        </div>
 
-          {/* Divider */}
-          <div className="w-px h-5 bg-stone-300/80 shrink-0" />
-
-          {/* Size Pills */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            <span className="text-[10px] font-bold tracking-[0.2em] uppercase text-stone-400 mr-1 hidden sm:inline">
-              Ukuran
+        {/* ── Size Pills Row (Diletakkan di Bawah Jenis Produk) ── */}
+        <div className="flex items-center gap-2 py-2 border-t border-stone-200/50 overflow-x-auto scrollbar-hide">
+          <div className="flex items-center gap-1.5 shrink-0 pr-1">
+            <span className="text-[10px] font-bold tracking-[0.2em] uppercase text-stone-400">
+              Ukuran:
             </span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
             {SIZE_OPTIONS.map((size) => (
               <button
                 key={size}
-                id={`filter-size-${size}`}
+                id={`filter-size-${size.replace(/\s+/g, '-')}`}
                 onClick={() => updateFilter({ has_size: currentSize === size ? null : size })}
-                className={`text-[11px] font-bold w-9 h-8 border transition-all duration-200 rounded-lg shadow-2xs ${
+                className={`text-[11px] font-bold min-w-[2.25rem] px-3 h-8 whitespace-nowrap border transition-all duration-200 rounded-lg shadow-2xs ${
                   currentSize === size
                     ? 'bg-stone-900 text-white border-stone-900'
                     : 'border-stone-300/80 text-stone-600 hover:border-stone-900 hover:text-stone-900 bg-white'

@@ -12,6 +12,7 @@ import uuid
 import urllib.parse
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import AnonymousUser
+from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
 from django.db import transaction
 from django.db.models import Sum, Count, Q
 from django.utils import timezone
@@ -39,13 +40,39 @@ import django_filters
 
 
 # ─────────────────────────────────────────
+# SECURITY CONSTANTS & FILE VALIDATORS
+# ─────────────────────────────────────────
+SELLER_SIGNER_SALT = 'dlrs-seller-session-v1'
+ALLOWED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
+ALLOWED_IMAGE_MIMES = {'image/jpeg', 'image/png', 'image/webp'}
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
+
+def validate_uploaded_image(file_obj):
+    """
+    Validates uploaded image file extension, MIME type, and size.
+    Prevents malicious scripts (.svg, .html, .exe) and DoS via large files.
+    """
+    if not file_obj:
+        return True, None
+    if file_obj.size > MAX_UPLOAD_SIZE:
+        return False, 'Ukuran file gambar maksimal adalah 10 MB.'
+    ext = os.path.splitext(file_obj.name)[1].lower()
+    if ext not in ALLOWED_IMAGE_EXTENSIONS:
+        return False, f'Format file {ext} tidak diizinkan. Hanya file JPG, JPEG, PNG, dan WEBP yang diperbolehkan.'
+    content_type = getattr(file_obj, 'content_type', '')
+    if content_type and content_type.lower() not in ALLOWED_IMAGE_MIMES:
+        return False, 'Tipe konten file tidak valid. Harap unggah file foto asli.'
+    return True, None
+
+
+# ─────────────────────────────────────────
 # SELLER AUTHENTICATION & PERMISSIONS
 # ─────────────────────────────────────────
 class SellerAuthentication(BaseAuthentication):
     """
-    Validates Authorization: Bearer <token> for Seller Center.
-    Accepts tokens starting with 'seller_auth_' or active Django staff sessions.
-    Token expires automatically if older than 24 hours (86400 seconds).
+    Validates cryptographically signed Authorization: Bearer <token> for Seller Center.
+    Token is signed with HMAC-SHA256 using Django SECRET_KEY and expires after 24 hours.
+    Tampered or forged tokens are automatically rejected.
     """
     SELLER_TOKEN_MAX_AGE = 24 * 3600  # 24 jam dalam detik
 
@@ -57,18 +84,18 @@ class SellerAuthentication(BaseAuthentication):
         elif request.GET.get('token'):
             token = request.GET.get('token', '').strip()
 
-        if token.startswith('seller_auth_'):
-            # Validate 24-hour expiration based on embedded timestamp
-            parts = token.split('_')
+        if token:
+            signer = TimestampSigner(salt=SELLER_SIGNER_SALT)
             try:
-                token_time = int(parts[-1])
-                current_time = int(timezone.now().timestamp())
-                if current_time - token_time > self.SELLER_TOKEN_MAX_AGE:
-                    raise exceptions.AuthenticationFailed('Sesi Anda telah kedaluwarsa setelah 24 jam. Silakan login kembali.')
-            except (ValueError, IndexError):
-                raise exceptions.AuthenticationFailed('Token otentikasi tidak valid.')
-
-            return (AnonymousUser(), token)
+                # Verifies cryptographic HMAC signature AND timestamp expiration
+                unsigned_payload = signer.unsign(token, max_age=self.SELLER_TOKEN_MAX_AGE)
+                if unsigned_payload.startswith('seller_auth:'):
+                    return (AnonymousUser(), token)
+            except SignatureExpired:
+                raise exceptions.AuthenticationFailed('Sesi Anda telah kedaluwarsa setelah 24 jam. Silakan login kembali.')
+            except BadSignature:
+                # Invalid signature or forged token
+                pass
 
         # Access underlying request._request to avoid DRF lazy auth recursion
         underlying = getattr(request, '_request', request)
@@ -81,10 +108,11 @@ class SellerAuthentication(BaseAuthentication):
 
 class IsSellerAuthenticated(BasePermission):
     """
-    Ensures that only authenticated sellers or staff can access management endpoints.
+    Ensures that only authenticated sellers with cryptographically verified token
+    or staff can access management endpoints.
     """
     def has_permission(self, request, view):
-        if getattr(request, 'auth', None) and isinstance(request.auth, str) and request.auth.startswith('seller_auth_'):
+        if getattr(request, 'auth', None):
             return True
         underlying = getattr(request, '_request', request)
         user = getattr(underlying, 'user', None)
@@ -115,8 +143,14 @@ class ProductFilter(django_filters.FilterSet):
         Filter: /api/products/?has_size=L
         Returns only products that have stock > 0 for the given size.
         """
+        val = value.strip().upper()
+        if val in ('ALL SIZE', 'ALL_SIZE', 'FREE_SIZE', 'FREESIZE'):
+            return queryset.filter(
+                variants__size__in=['ALL SIZE', 'FREE_SIZE'],
+                variants__stock_quantity__gt=0
+            ).distinct()
         return queryset.filter(
-            variants__size=value.upper(),
+            variants__size__iexact=val,
             variants__stock_quantity__gt=0
         ).distinct()
 
@@ -238,6 +272,45 @@ class ShippingRateListView(generics.ListAPIView):
     pagination_class = None
 
 
+def get_admin_whatsapp_contacts():
+    """
+    Returns list of configured admin WhatsApp contacts for round-robin rotation.
+    Format: [{'id': 'admin-1', 'name': 'Admin 1', 'number': '6281390796231'}, ...]
+    """
+    contacts = []
+    # Check numbered environment variables
+    for i in range(1, 10):
+        num = (
+            os.getenv(f'NEXT_PUBLIC_WHATSAPP_NUMBER_{i}') or
+            os.getenv(f'WHATSAPP_NUMBER_{i}') or
+            ''
+        ).strip()
+        clean = ''.join(filter(str.isdigit, num))
+        if clean:
+            contacts.append({
+                'id': f'admin-{i}',
+                'name': f'Admin {i}',
+                'number': clean
+            })
+
+    # Fallback to single number if no numbered vars
+    if not contacts:
+        fallback = (
+            os.getenv('NEXT_PUBLIC_WHATSAPP_NUMBER') or
+            os.getenv('WHATSAPP_NUMBER') or
+            ''
+        ).strip()
+        clean = ''.join(filter(str.isdigit, fallback))
+        if clean:
+            contacts.append({
+                'id': 'admin-1',
+                'name': 'Admin 1',
+                'number': clean
+            })
+
+    return contacts
+
+
 # ─────────────────────────────────────────
 # CHECKOUT VIEW (AUTO DEDUCT STOCK + WA LINK)
 # ─────────────────────────────────────────
@@ -345,7 +418,19 @@ class CheckoutView(APIView):
 
             total_amount = subtotal_items + shipping_cost
 
-            # 5. Create Order
+            # 5. Determine assigned admin via round-robin (count % total_admins)
+            admin_contacts = get_admin_whatsapp_contacts()
+            if admin_contacts:
+                existing_orders_count = Order.objects.count()
+                assigned_idx = existing_orders_count % len(admin_contacts)
+                assigned_admin_info = admin_contacts[assigned_idx]
+                assigned_admin_name = assigned_admin_info['name']
+                clean_admin_phone = assigned_admin_info['number']
+            else:
+                assigned_admin_name = 'Admin'
+                clean_admin_phone = ''
+
+            # 6. Create Order
             order = Order.objects.create(
                 order_number=order_number,
                 customer_name=data['customer_name'].strip(),
@@ -359,13 +444,14 @@ class CheckoutView(APIView):
                 total_amount=total_amount,
                 notes=data.get('notes', '').strip(),
                 status='PENDING',
+                assigned_admin=assigned_admin_name,
             )
 
             for oi in order_items_to_create:
                 oi.order = order
             OrderItem.objects.bulk_create(order_items_to_create)
 
-        # 6. Generate formatted WhatsApp message
+        # 7. Generate formatted WhatsApp message
         items_lines = []
         for idx, item in enumerate(order_items_to_create, 1):
             items_lines.append(
@@ -379,13 +465,14 @@ class CheckoutView(APIView):
         notes_text = f"\n- Catatan: {order.notes}" if order.notes else ""
 
         wa_message = (
-            f"Halo Admin, saya ingin memesan pakaian dengan rincian berikut:\n\n"
+            f"Halo {assigned_admin_name}, saya ingin memesan pakaian dengan rincian berikut:\n\n"
             f"📋 *NO. PESANAN: {order.order_number}*\n"
             f"----------------------------------------\n"
             f"*Rincian Pesanan:*\n"
             f"{items_text}\n\n"
-            f"Total Pakaian: Rp {order.subtotal_items:,.0f}\n"
-            f"Daerah Pengiriman: {order.shipping_province}\n"
+            f"Subtotal Pakaian: Rp {order.subtotal_items:,.0f}\n"
+            f"Ongkos Kirim ({order.shipping_province}): Rp {order.shipping_cost:,.0f}\n"
+            f"*Total Tagihan: Rp {order.total_amount:,.0f}*\n"
             f"----------------------------------------\n"
             f"📍 *Data Pengiriman:*\n"
             f"- Nama: {order.customer_name}\n"
@@ -397,8 +484,6 @@ class CheckoutView(APIView):
             f"Mohon info nomor rekening pembayarannya ya min. Terima kasih!"
         )
 
-        admin_phone = os.getenv('NEXT_PUBLIC_WHATSAPP_NUMBER') or os.getenv('WHATSAPP_NUMBER') or ''
-        clean_admin_phone = ''.join(filter(str.isdigit, admin_phone))
         whatsapp_url = f"https://wa.me/{clean_admin_phone}?text={urllib.parse.quote(wa_message)}" if clean_admin_phone else ""
 
         return Response({
@@ -410,19 +495,162 @@ class CheckoutView(APIView):
             'shipping_province': order.shipping_province,
             'whatsapp_url': whatsapp_url,
             'whatsapp_message': wa_message,
+            'assigned_admin': assigned_admin_name,
+            'assigned_phone': clean_admin_phone,
         }, status=status.HTTP_201_CREATED)
 
 
 # ─────────────────────────────────────────
-# ORDER DETAIL VIEW
+# CART STOCK LIVE SYNC VIEW
 # ─────────────────────────────────────────
-class OrderDetailView(generics.RetrieveAPIView):
+class CartStockSyncView(APIView):
+    """
+    GET /api/orders/cart-stock/?variant_ids=1,2,3
+    Mengambil sisa stok & harga terkini dari server agar keranjang pembeli selalu akurat.
+    """
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        raw_ids = request.query_params.get('variant_ids', '')
+        id_list = []
+        for part in raw_ids.split(','):
+            part = part.strip()
+            if part.isdigit():
+                id_list.append(int(part))
+
+        if not id_list:
+            return Response({'variants': []})
+
+        variants = (
+            Variant.objects
+            .select_related('product')
+            .filter(id__in=id_list[:50])
+        )
+        data = [
+            {
+                'variant_id': v.id,
+                'product_id': v.product_id,
+                'product_title': v.product.title,
+                'is_product_active': v.product.is_active,
+                'price': float(v.product.base_price),
+                'stock_quantity': v.stock_quantity if v.product.is_active else 0,
+            }
+            for v in variants
+        ]
+        return Response({'variants': data})
+
+
+# ─────────────────────────────────────────
+# ORDER DETAIL VIEW (BY ORDER NUMBER OR PHONE)
+# ─────────────────────────────────────────
+def mask_customer_name(name: str) -> str:
+    if not name:
+        return 'Pelanggan'
+    parts = name.strip().split()
+    masked_parts = []
+    for p in parts:
+        if len(p) <= 2:
+            masked_parts.append(p)
+        else:
+            masked_parts.append(p[0] + '*' * (len(p) - 2) + p[-1])
+    return ' '.join(masked_parts)
+
+def mask_customer_phone(phone: str) -> str:
+    if not phone:
+        return ''
+    digits = ''.join(filter(str.isdigit, phone))
+    if len(digits) >= 8:
+        return digits[:4] + '****' + digits[-3:]
+    return '****'
+
+class OrderDetailView(APIView):
     """
     GET /api/orders/<order_number>/
+    Mendukung pencarian menggunakan Nomor Pesanan (ORD-...) ATAU Nomor WhatsApp Pembeli (08... / 628...).
+    Dilengkapi rate-limiting dan masking PII untuk melindungi privasi pembeli dari scraping.
     """
-    queryset = Order.objects.prefetch_related('items')
-    serializer_class = OrderDetailSerializer
-    lookup_field = 'order_number'
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'order_tracking'
+
+    def get(self, request, order_number):
+        query = (order_number or '').strip()
+        if not query:
+            return Response({'error': 'Masukkan Nomor Pesanan atau Nomor WhatsApp.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 1. Coba cari berdasarkan Nomor Pesanan (ORD-...)
+        order = Order.objects.prefetch_related('items').filter(order_number__iexact=query).first()
+
+        # 2. Jika tidak ditemukan, cek apakah input berupa Nomor HP / WhatsApp Pembeli
+        if not order:
+            digits = ''.join(filter(str.isdigit, query))
+            if len(digits) >= 8:
+                # Normalisasi akhiran nomor HP (tanpa 0 / 62 di depan) agar cocok baik 08xx maupun 628xx
+                tail_digits = digits[2:] if digits.startswith('62') else (digits[1:] if digits.startswith('0') else digits)
+                if len(tail_digits) >= 7:
+                    order = (
+                        Order.objects.prefetch_related('items')
+                        .filter(customer_phone__icontains=tail_digits)
+                        .order_by('-created_at')
+                        .first()
+                    )
+
+        if not order:
+            return Response(
+                {'error': f'Pesanan dengan nomor atau WhatsApp "{query}" tidak ditemukan.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Verifikasi apakah request berasal dari Admin/Seller terotentikasi
+        underlying = getattr(request, '_request', request)
+        user = getattr(underlying, 'user', None)
+        is_seller = bool(user and user.is_authenticated and user.is_staff)
+        if not is_seller and getattr(request, 'auth', None):
+            is_seller = True
+        else:
+            auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+            if auth_header.startswith('Bearer '):
+                t = auth_header.split(' ')[1].strip()
+                try:
+                    TimestampSigner(salt=SELLER_SIGNER_SALT).unsign(t, max_age=86400)
+                    is_seller = True
+                except Exception:
+                    pass
+
+        serialized = OrderDetailSerializer(order).data
+
+        # Masking data pribadi (PII) jika diakses oleh publik non-admin
+        if not is_seller:
+            serialized['customer_name'] = mask_customer_name(order.customer_name)
+            serialized['customer_phone'] = mask_customer_phone(order.customer_phone)
+            serialized['shipping_address'] = f"*** (Alamat detail dilindungi privasi) — {order.shipping_city}, {order.shipping_province}"
+            if serialized.get('notes'):
+                serialized['notes'] = '***'
+
+        # Sertakan daftar pesanan lain milik nomor HP yang sama agar pembeli mudah berpindah pesanan
+        phone_digits = ''.join(filter(str.isdigit, order.customer_phone or ''))
+        tail_phone = phone_digits[2:] if phone_digits.startswith('62') else (phone_digits[1:] if phone_digits.startswith('0') else phone_digits)
+        related_orders = []
+        if len(tail_phone) >= 7:
+            siblings = (
+                Order.objects
+                .filter(customer_phone__icontains=tail_phone)
+                .order_by('-created_at')[:10]
+            )
+            related_orders = [
+                {
+                    'order_number': o.order_number,
+                    'status': o.status,
+                    'total_amount': o.total_amount,
+                    'created_at': o.created_at,
+                }
+                for o in siblings
+            ]
+
+        serialized['related_orders'] = related_orders
+        return Response(serialized)
 
 
 # ─────────────────────────────────────────
@@ -432,7 +660,8 @@ class OrderDetailView(generics.RetrieveAPIView):
 class SellerLoginView(APIView):
     """
     POST /api/seller/login/
-    Verifikasi kata sandi admin / PIN toko dengan perlindungan brute force.
+    Verifikasi kata sandi admin / PIN toko dengan perlindungan brute force
+    dan menghasilkan cryptographically-signed token (HMAC-SHA256).
     """
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -443,13 +672,16 @@ class SellerLoginView(APIView):
         password = request.data.get('password', '').strip()
         username = request.data.get('username', 'admin').strip()
 
+        signer = TimestampSigner(salt=SELLER_SIGNER_SALT)
+        now_ts = int(timezone.now().timestamp())
+
         # Check Django auth
         user = authenticate(username=username, password=password)
         if user and user.is_staff:
-            now_ts = int(timezone.now().timestamp())
+            signed_token = signer.sign(f'seller_auth:{user.username}:{now_ts}')
             return Response({
                 'success': True,
-                'token': f'seller_auth_{user.id}_{now_ts}',
+                'token': signed_token,
                 'expires_in': 86400,
                 'username': user.username,
             })
@@ -457,13 +689,15 @@ class SellerLoginView(APIView):
         # Check SELLER_PASSCODE from environment
         seller_passcode = os.getenv('SELLER_PASSCODE') or os.getenv('ADMIN_PASSCODE')
         if seller_passcode and password == seller_passcode:
-            now_ts = int(timezone.now().timestamp())
+            signed_token = signer.sign(f'seller_auth:admin:{now_ts}')
             return Response({
                 'success': True,
-                'token': f'seller_auth_admin_{now_ts}',
+                'token': signed_token,
                 'expires_in': 86400,
                 'username': username or 'admin',
             })
+
+        return Response({'error': 'Kata sandi atau PIN admin salah.'}, status=status.HTTP_401_UNAUTHORIZED)
 
         return Response({'error': 'Kata sandi atau PIN admin salah.'}, status=status.HTTP_401_UNAUTHORIZED)
 
@@ -473,25 +707,36 @@ class SellerStatsView(APIView):
     """
     GET /api/seller/stats/
     Ringkasan performa toko untuk kartu metrik dengan query agregasi berkecepatan tinggi.
+    Memisahkan Omset Bersih (Lunas) dengan Menunggu Pembayaran (Pending) serta Omset Hari Ini.
     """
     authentication_classes = [SellerAuthentication]
     permission_classes = [IsSellerAuthenticated]
 
     def get(self, request):
+        from datetime import timedelta
+        now = timezone.now()
+        today_date = timezone.localtime(now).date()
+        expired_cutoff = now - timedelta(hours=24)
+        paid_statuses = ['CONFIRMED', 'SHIPPED', 'COMPLETED']
+
         order_stats = Order.objects.aggregate(
             total_orders=Count('id'),
             pending_orders=Count('id', filter=Q(status='PENDING')),
             confirmed_orders=Count('id', filter=Q(status='CONFIRMED')),
             shipped_orders=Count('id', filter=Q(status='SHIPPED')),
-            total_revenue=Sum('total_amount', filter=~Q(status='CANCELLED')),
+            completed_orders=Count('id', filter=Q(status='COMPLETED')),
+            expired_pending_orders=Count('id', filter=Q(status='PENDING', created_at__lte=expired_cutoff)),
+            total_revenue=Sum('total_amount', filter=Q(status__in=paid_statuses)),
+            pending_revenue=Sum('total_amount', filter=Q(status='PENDING')),
+            today_revenue=Sum('total_amount', filter=Q(status__in=paid_statuses, created_at__date=today_date)),
+            today_orders=Count('id', filter=Q(created_at__date=today_date) & ~Q(status='CANCELLED')),
         )
-        total_revenue = order_stats['total_revenue'] or 0
 
         total_products = Product.objects.filter(is_active=True).count()
 
         variant_stats = Variant.objects.filter(product__is_active=True).aggregate(
             out_of_stock=Count('id', filter=Q(stock_quantity=0)),
-            low_stock=Count('id', filter=Q(stock_quantity__gt=0, stock_quantity__lte=3)),
+            low_stock=Count('id', filter=Q(stock_quantity__gt=0, stock_quantity__lte=5)),
         )
 
         return Response({
@@ -499,7 +744,12 @@ class SellerStatsView(APIView):
             'pending_orders': order_stats['pending_orders'] or 0,
             'confirmed_orders': order_stats['confirmed_orders'] or 0,
             'shipped_orders': order_stats['shipped_orders'] or 0,
-            'total_revenue': total_revenue,
+            'completed_orders': order_stats['completed_orders'] or 0,
+            'expired_pending_orders': order_stats['expired_pending_orders'] or 0,
+            'total_revenue': order_stats['total_revenue'] or 0,
+            'pending_revenue': order_stats['pending_revenue'] or 0,
+            'today_revenue': order_stats['today_revenue'] or 0,
+            'today_orders': order_stats['today_orders'] or 0,
             'total_products': total_products,
             'out_of_stock': variant_stats['out_of_stock'] or 0,
             'low_stock': variant_stats['low_stock'] or 0,
@@ -543,11 +793,37 @@ class SellerOrderListView(generics.ListAPIView):
         return qs[:150]
 
 
+def detect_courier_from_resi(resi: str) -> str:
+    """Deteksi nama ekspedisi kurir otomatis berdasarkan format/awalan nomor resi Indonesia."""
+    if not resi:
+        return ''
+    r = resi.strip().upper()
+    if r.startswith(('JP', 'JD', 'JX', 'JT', 'JB')):
+        return 'J&T Express'
+    if r.startswith('SPXID') or (r.startswith('ID') and len(r) >= 14):
+        return 'Shopee Express (SPX)'
+    if r.startswith('00') and r.isdigit() and len(r) >= 11:
+        return 'SiCepat'
+    if r.startswith('1000') and r.isdigit() and len(r) >= 12:
+        return 'AnterAja'
+    if r.startswith(('11LP', 'LP')):
+        return 'Lion Parcel'
+    if r.startswith(('IDE', 'IDS')):
+        return 'ID Express'
+    if r.startswith(('NLIDAP', 'NVID')):
+        return 'Ninja Xpress'
+    if r.startswith(('SOC', 'CGK', 'BDG', 'SUB', 'TGR', 'JOG', 'DPS', 'MKS', 'MDN', 'SMG', 'SLO', 'MLG', 'BKI', 'DPK', 'BGR', 'PLM', 'PKU', 'BPN', 'BJM', 'CM', 'TKP')):
+        return 'JNE'
+    if r.startswith('P') and len(r) >= 11:
+        return 'Pos Indonesia'
+    return ''
+
+
 @method_decorator(csrf_exempt, name='dispatch')
 class SellerOrderStatusUpdateView(APIView):
     """
     PATCH /api/seller/orders/<order_number>/status/
-    Ubah status pesanan (Lunas, Kirim, Batal) & input nomor resi.
+    Ubah status pesanan (Lunas, Kirim, Batal), input nomor resi, kurir & foto struk resi.
     """
     authentication_classes = [SellerAuthentication]
     permission_classes = [IsSellerAuthenticated]
@@ -560,6 +836,9 @@ class SellerOrderStatusUpdateView(APIView):
 
         new_status = request.data.get('status')
         tracking_number = request.data.get('tracking_number')
+        shipping_courier = request.data.get('shipping_courier')
+        receipt_image = request.FILES.get('receipt_image')
+        remove_receipt = str(request.data.get('remove_receipt', '')).lower() in ['true', '1']
 
         if new_status:
             order.status = new_status
@@ -567,12 +846,59 @@ class SellerOrderStatusUpdateView(APIView):
         if tracking_number is not None:
             order.tracking_number = tracking_number.strip()
 
+        if shipping_courier is not None:
+            order.shipping_courier = shipping_courier.strip()
+        elif order.tracking_number and not order.shipping_courier:
+            detected = detect_courier_from_resi(order.tracking_number)
+            if detected:
+                order.shipping_courier = detected
+
+        if receipt_image:
+            is_valid, err_msg = validate_uploaded_image(receipt_image)
+            if not is_valid:
+                return Response({'error': err_msg}, status=status.HTTP_400_BAD_REQUEST)
+            order.tracking_receipt_image = receipt_image
+        elif remove_receipt and order.tracking_receipt_image:
+            order.tracking_receipt_image.delete(save=False)
+            order.tracking_receipt_image = None
+
         # save() on Order model automatically handles stock restoration if status changed to CANCELLED
         order.save()
 
         return Response({
             'success': True,
             'order': OrderDetailSerializer(order).data
+        })
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class SellerCancelExpiredOrdersView(APIView):
+    """
+    POST /api/seller/orders/cancel-expired/
+    Membatalkan seluruh pesanan berstatus PENDING yang sudah lewat > 24 jam
+    dan mengembalikan stok pakaiannya secara atomik ke katalog.
+    """
+    authentication_classes = [SellerAuthentication]
+    permission_classes = [IsSellerAuthenticated]
+
+    def post(self, request):
+        from datetime import timedelta
+        cutoff = timezone.now() - timedelta(hours=24)
+        with transaction.atomic():
+            expired_orders = list(
+                Order.objects.prefetch_related('items')
+                .filter(status='PENDING', created_at__lte=cutoff)
+            )
+            cancelled_count = 0
+            for o in expired_orders:
+                o.status = 'CANCELLED'
+                o.save()  # Order.save() atomically restores Variant stock_quantity
+                cancelled_count += 1
+
+        return Response({
+            'success': True,
+            'cancelled_count': cancelled_count,
+            'message': f'{cancelled_count} pesanan kedaluwarsa (>24 jam belum bayar) telah dibatalkan & stok dikembalikan ke katalog.',
         })
 
 
@@ -722,6 +1048,11 @@ class SellerProductCreateView(APIView):
                     color_url = c_data.get('image_url', '').strip()
                     is_prim = c_data.get('is_primary', False) or (idx == 0 and not has_primary)
 
+                    if color_file:
+                        is_valid, err_msg = validate_uploaded_image(color_file)
+                        if not is_valid:
+                            return Response({'error': f"Foto variasi '{c_name}': {err_msg}"}, status=status.HTTP_400_BAD_REQUEST)
+
                     if color_file or color_url:
                         ProductImage.objects.create(
                             product=product,
@@ -778,14 +1109,18 @@ class SellerProductCreateView(APIView):
 
                 if not variants_list:
                     variants_list = [
+                        {'size': 'ALL SIZE', 'color': color_name, 'stock': 10},
+                        {'size': 'STANDAR', 'color': color_name, 'stock': 10},
+                        {'size': 'JUMBO', 'color': color_name, 'stock': 8},
                         {'size': 'S', 'color': color_name, 'stock': 5},
                         {'size': 'M', 'color': color_name, 'stock': 10},
                         {'size': 'L', 'color': color_name, 'stock': 10},
                         {'size': 'XL', 'color': color_name, 'stock': 5},
+                        {'size': 'XXL', 'color': color_name, 'stock': 5},
                     ]
 
                 for v_data in variants_list:
-                    v_size = str(v_data.get('size', 'All Size')).upper().strip()
+                    v_size = str(v_data.get('size', 'ALL SIZE')).upper().strip()
                     v_color = str(v_data.get('color', color_name)).strip() or color_name
                     v_stock = max(0, int(v_data.get('stock', 0)))
 
@@ -833,6 +1168,11 @@ class SellerColorImageUploadView(APIView):
         if not color:
             return Response({'error': 'Nama warna harus diisi.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        if image_file:
+            is_valid, err_msg = validate_uploaded_image(image_file)
+            if not is_valid:
+                return Response({'error': err_msg}, status=status.HTTP_400_BAD_REQUEST)
+
         if not image_file and not image_url:
             return Response({'error': 'Harap pilih file gambar atau masukkan URL gambar.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -875,20 +1215,24 @@ class SellerColorImageUploadView(APIView):
                     sizes_data = [{'size': s, 'stock': 5} for s in distinct_sizes]
                 else:
                     sizes_data = [
+                        {'size': 'ALL SIZE', 'stock': 10},
+                        {'size': 'STANDAR', 'stock': 10},
+                        {'size': 'JUMBO', 'stock': 8},
                         {'size': 'S', 'stock': 5},
                         {'size': 'M', 'stock': 10},
                         {'size': 'L', 'stock': 10},
                         {'size': 'XL', 'stock': 5},
+                        {'size': 'XXL', 'stock': 5},
                     ]
 
             for s_item in sizes_data:
-                v_size = str(s_item.get('size', 'All Size')).upper().strip()
+                v_size = str(s_item.get('size', 'ALL SIZE')).upper().strip()
                 v_stock = max(0, int(s_item.get('stock', 0)))
-                Variant.objects.create(
+                Variant.objects.update_or_create(
                     product=product,
                     size=v_size,
                     color=color,
-                    stock_quantity=v_stock,
+                    defaults={'stock_quantity': v_stock},
                 )
 
         return Response({
@@ -910,17 +1254,86 @@ class SellerProductImageDeleteView(APIView):
     def delete(self, request, pk, image_id):
         try:
             img = ProductImage.objects.get(pk=image_id, product_id=pk)
+            was_primary = img.is_primary
             img.delete()
+            if was_primary:
+                next_img = ProductImage.objects.filter(product_id=pk).first()
+                if next_img:
+                    next_img.is_primary = True
+                    next_img.save(update_fields=['is_primary'])
             return Response({'success': True})
         except ProductImage.DoesNotExist:
             return Response({'error': 'Foto tidak ditemukan.'}, status=status.HTTP_404_NOT_FOUND)
 
 
 @method_decorator(csrf_exempt, name='dispatch')
+class SellerProductColorActionView(APIView):
+    """
+    POST /api/seller/products/<int:pk>/color-action/
+    Aksi manajemen variasi warna:
+    - action='set_primary': Jadikan foto warna ini sebagai Foto Cover Utama produk
+    - action='delete_color': Hapus variasi warna beserta seluruh ukuran dan fotonya
+    """
+    authentication_classes = [SellerAuthentication]
+    permission_classes = [IsSellerAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            product = Product.objects.get(pk=pk)
+        except Product.DoesNotExist:
+            return Response({'error': 'Produk tidak ditemukan.'}, status=status.HTTP_404_NOT_FOUND)
+
+        action = request.data.get('action', '').strip()
+        color = request.data.get('color', '').strip()
+
+        if not color:
+            return Response({'error': 'Nama warna diperlukan.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if action == 'set_primary':
+            target_img = product.images.filter(color__iexact=color).first()
+            if not target_img:
+                return Response({'error': f'Belum ada foto yang terpasang untuk warna "{color}". Upload foto terlebih dahulu.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            with transaction.atomic():
+                product.images.update(is_primary=False)
+                target_img.is_primary = True
+                target_img.save(update_fields=['is_primary'])
+
+            return Response({
+                'success': True,
+                'message': f'Foto warna "{color}" berhasil dijadikan Foto Sampul Utama (Cover Katalog).',
+            })
+
+        elif action == 'delete_color':
+            distinct_colors = list(product.variants.values_list('color', flat=True).distinct())
+            if len(distinct_colors) <= 1:
+                return Response(
+                    {'error': 'Produk wajib memiliki minimal 1 variasi warna. Tambahkan warna lain terlebih dahulu sebelum menghapus warna ini.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            with transaction.atomic():
+                product.variants.filter(color__iexact=color).delete()
+                product.images.filter(color__iexact=color).delete()
+                if not product.images.filter(is_primary=True).exists():
+                    next_img = product.images.first()
+                    if next_img:
+                        next_img.is_primary = True
+                        next_img.save(update_fields=['is_primary'])
+
+            return Response({
+                'success': True,
+                'message': f'Variasi warna "{color}" beserta stok ukurannya berhasil dihapus.',
+            })
+
+        return Response({'error': 'Aksi warna tidak valid.'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
 class SellerProductUpdateView(APIView):
     """
     PATCH /api/seller/products/<int:pk>/update/
-    Edit produk: nama, harga, deskripsi, kategori, status aktif/draft.
+    Edit produk: nama, harga, deskripsi, panduan ukuran, kategori, status aktif/draft.
     """
     authentication_classes = [SellerAuthentication]
     permission_classes = [IsSellerAuthenticated]
@@ -934,9 +1347,9 @@ class SellerProductUpdateView(APIView):
         title = request.data.get('title')
         base_price = request.data.get('base_price')
         description = request.data.get('description')
+        size_guide = request.data.get('size_guide')
         category_id = request.data.get('category_id')
         is_active = request.data.get('is_active')
-        sort_order = request.data.get('sort_order')
 
         if title is not None:
             product.title = title.strip()
@@ -947,16 +1360,13 @@ class SellerProductUpdateView(APIView):
                 return Response({'error': 'Harga tidak valid.'}, status=status.HTTP_400_BAD_REQUEST)
         if description is not None:
             product.description = description.strip()
+        if size_guide is not None:
+            product.size_guide = size_guide.strip()
         if category_id is not None:
             category = Category.objects.filter(pk=category_id).first()
             product.category = category
         if is_active is not None:
             product.is_active = str(is_active).lower() in ['true', '1']
-        if sort_order is not None:
-            try:
-                product.sort_order = int(sort_order)
-            except (ValueError, AttributeError):
-                pass
 
         product.save()
 
@@ -1016,7 +1426,7 @@ class SellerLowStockAlertsView(APIView):
             Variant.objects
             .filter(product__is_active=True, stock_quantity__lte=threshold)
             .select_related('product', 'product__category')
-            .order_by('stock_quantity')[:50]
+            .order_by('stock_quantity', 'product__title')[:250]
         )
 
         data = []

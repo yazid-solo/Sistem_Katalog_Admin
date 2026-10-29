@@ -149,5 +149,7 @@ export interface CheckoutResponse {
   shipping_province?: string;
   whatsapp_url: string;
   whatsapp_message: string;
+  assigned_admin?: string;
+  assigned_phone?: string;
   error?: string;
 }

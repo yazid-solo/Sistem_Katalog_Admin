@@ -33,8 +33,11 @@ const DEFAULT_SHIPPING_RATES: ShippingRate[] = [
   { id: 22, province: 'Maluku & Papua', cost: '50000', formatted_cost: 'Rp 50.000', estimated_delivery: '4-7 Hari', sort_order: 22 },
 ];
 
+const CUSTOMER_PROFILE_KEY = 'dlrs_customer_profile_v1';
+const RECENT_ORDERS_KEY = 'dlrs_recent_orders_v1';
+
 export default function KeranjangPage() {
-  const { items, removeFromCart, updateQuantity, clearCart, totalItems, subtotal } = useCart();
+  const { items, removeFromCart, updateQuantity, clearCart, syncStockWithServer, totalItems, subtotal } = useCart();
 
   const [shippingRates, setShippingRates] = useState<ShippingRate[]>(DEFAULT_SHIPPING_RATES);
   const [selectedProvince, setSelectedProvince] = useState<string>('DKI Jakarta');
@@ -44,11 +47,42 @@ export default function KeranjangPage() {
   const [shippingDistrict, setShippingDistrict] = useState<string>('');
   const [shippingAddress, setShippingAddress] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
+  const [hasSavedProfile, setHasSavedProfile] = useState<boolean>(false);
+  const [stockSyncNotice, setStockSyncNotice] = useState<string | null>(null);
 
   const [isLoadingRates, setIsLoadingRates] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [orderSuccess, setOrderSuccess] = useState<CheckoutResponse | null>(null);
+
+  const selectedRateObj = shippingRates.find((r) => r.province === selectedProvince);
+  const shippingCost = selectedRateObj ? Number(selectedRateObj.cost) || 0 : 0;
+  const grandTotal = subtotal + shippingCost;
+
+  // Load saved customer profile & sync live stock from server
+  useEffect(() => {
+    try {
+      const rawProfile = localStorage.getItem(CUSTOMER_PROFILE_KEY);
+      if (rawProfile) {
+        const parsed = JSON.parse(rawProfile);
+        if (parsed.customerName) setCustomerName(parsed.customerName);
+        if (parsed.customerPhone) setCustomerPhone(parsed.customerPhone);
+        if (parsed.selectedProvince) setSelectedProvince(parsed.selectedProvince);
+        if (parsed.shippingCity) setShippingCity(parsed.shippingCity);
+        if (parsed.shippingDistrict) setShippingDistrict(parsed.shippingDistrict);
+        if (parsed.shippingAddress) setShippingAddress(parsed.shippingAddress);
+        setHasSavedProfile(true);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (items.length > 0) {
+      syncStockWithServer().then((notice) => {
+        if (notice) setStockSyncNotice(notice);
+      });
+    }
+  }, [items.length]);
 
   // Load active shipping rates from server and update list
   useEffect(() => {
@@ -128,6 +162,40 @@ export default function KeranjangPage() {
       setOrderSuccess(res);
       clearCart();
 
+      // Save customer shipping profile for future repeat orders
+      try {
+        localStorage.setItem(
+          CUSTOMER_PROFILE_KEY,
+          JSON.stringify({
+            customerName: customerName.trim(),
+            customerPhone: customerPhone.trim(),
+            selectedProvince,
+            shippingCity: shippingCity.trim(),
+            shippingDistrict: shippingDistrict.trim(),
+            shippingAddress: shippingAddress.trim(),
+          })
+        );
+        setHasSavedProfile(true);
+      } catch {}
+
+      // Save order number to recent orders in localStorage for 1-click tracking at /lacak-pesanan
+      try {
+        const existingRaw = localStorage.getItem(RECENT_ORDERS_KEY);
+        const existingList = existingRaw ? JSON.parse(existingRaw) : [];
+        const newEntry = {
+          order_number: res.order_number,
+          customer_name: customerName.trim(),
+          customer_phone: customerPhone.trim(),
+          total_amount: res.total_amount,
+          created_at: new Date().toISOString(),
+        };
+        const deduplicated = [
+          newEntry,
+          ...existingList.filter((o: any) => o.order_number !== res.order_number),
+        ].slice(0, 10);
+        localStorage.setItem(RECENT_ORDERS_KEY, JSON.stringify(deduplicated));
+      } catch {}
+
       // Open WhatsApp in new tab/window
       if (res.whatsapp_url) {
         window.open(res.whatsapp_url, '_blank');
@@ -143,7 +211,7 @@ export default function KeranjangPage() {
     <div className="min-h-screen flex flex-col bg-stone-50">
       <Navbar />
 
-      <main className="flex-1 max-w-screen-xl mx-auto px-4 md:px-10 pt-24 pb-20 w-full">
+      <main className="flex-1 max-w-screen-xl mx-auto px-4 sm:px-6 md:px-10 pt-24 pb-20 w-full">
         {/* Header Breadcrumb */}
         <div className="mb-6 flex items-center justify-between gap-3">
           <div>
@@ -180,7 +248,7 @@ export default function KeranjangPage() {
                 {orderSuccess.order_number}
               </h2>
               <p className="text-sm text-stone-600 max-w-md mx-auto">
-                Stok baju telah otomatis dikunci untuk Anda. Rincian pesanan telah diteruskan ke WhatsApp toko kami untuk verifikasi pembayaran.
+                Stok baju telah otomatis dikunci untuk Anda. Rincian pesanan telah diteruskan ke WhatsApp toko kami {orderSuccess.assigned_admin ? `(${orderSuccess.assigned_admin})` : ''} untuk verifikasi pembayaran.
               </p>
             </div>
 
@@ -192,16 +260,16 @@ export default function KeranjangPage() {
                 </span>
               </div>
               <div className="flex justify-between text-stone-600">
-                <span>Daerah Tujuan:</span>
+                <span>Ongkos Kirim ({orderSuccess.shipping_province || selectedProvince}):</span>
                 <span className="font-semibold text-zinc-900">
-                  {orderSuccess.shipping_province || selectedProvince}
+                  Rp {Number(orderSuccess.shipping_cost ?? shippingCost).toLocaleString('id-ID')}
                 </span>
               </div>
               <div className="divider my-2" />
               <div className="flex justify-between text-sm font-bold text-zinc-900">
-                <span>Total Pakaian:</span>
+                <span>Total Tagihan:</span>
                 <span className="text-emerald-700">
-                  Rp {Number(orderSuccess.subtotal_items || 0).toLocaleString('id-ID')}
+                  Rp {Number(orderSuccess.total_amount || (Number(orderSuccess.subtotal_items || 0) + Number(orderSuccess.shipping_cost ?? shippingCost))).toLocaleString('id-ID')}
                 </span>
               </div>
             </div>
@@ -216,7 +284,7 @@ export default function KeranjangPage() {
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
                 </svg>
-                <span>Buka WhatsApp Sekarang</span>
+                <span>Buka WhatsApp Sekarang {orderSuccess.assigned_admin ? `(${orderSuccess.assigned_admin})` : ''}</span>
               </a>
 
               <Link
@@ -260,6 +328,19 @@ export default function KeranjangPage() {
                     </button>
                   )}
                 </div>
+
+                {stockSyncNotice && (
+                  <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs font-medium flex items-center justify-between gap-2">
+                    <span>ℹ️ {stockSyncNotice}</span>
+                    <button
+                      type="button"
+                      onClick={() => setStockSyncNotice(null)}
+                      className="text-amber-700 font-bold px-1.5"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
 
                 {items.length === 0 ? (
                   <div className="py-12 text-center space-y-4">
@@ -379,10 +460,38 @@ export default function KeranjangPage() {
                 onSubmit={handleSubmitCheckout}
                 className="bg-white border border-stone-200/80 rounded-2xl p-4 sm:p-6 shadow-sm space-y-4"
               >
-                <h2 className="text-base font-semibold text-zinc-900 flex items-center gap-2 pb-2 border-b border-stone-100">
-                  <span>📍</span>
-                  <span>Data Pengiriman & Pemesan</span>
-                </h2>
+                <div className="flex items-center justify-between gap-2 pb-2 border-b border-stone-100">
+                  <h2 className="text-base font-semibold text-zinc-900 flex items-center gap-2">
+                    <span>📍</span>
+                    <span>Data Pengiriman & Pemesan</span>
+                  </h2>
+                  {hasSavedProfile && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try {
+                          localStorage.removeItem(CUSTOMER_PROFILE_KEY);
+                        } catch {}
+                        setCustomerName('');
+                        setCustomerPhone('');
+                        setShippingCity('');
+                        setShippingDistrict('');
+                        setShippingAddress('');
+                        setHasSavedProfile(false);
+                      }}
+                      className="text-[11px] font-medium text-stone-500 hover:text-rose-600 transition-colors cursor-pointer"
+                    >
+                      Reset Alamat
+                    </button>
+                  )}
+                </div>
+
+                {hasSavedProfile && (
+                  <div className="px-3 py-2 bg-emerald-50/70 border border-emerald-200/80 rounded-xl text-[11px] text-emerald-900 flex items-center gap-1.5">
+                    <span>✓</span>
+                    <span>Alamat pengiriman terakhir Anda terisi otomatis.</span>
+                  </div>
+                )}
 
                 {errorMsg && (
                   <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-medium animate-fade-in">
@@ -509,18 +618,18 @@ export default function KeranjangPage() {
                   </div>
 
                   <div className="flex justify-between text-stone-600">
-                    <span>Daerah Tujuan:</span>
+                    <span>Ongkos Kirim ({selectedProvince || 'Belum dipilih'}):</span>
                     <span className="font-semibold text-zinc-900">
-                      {selectedProvince || 'Belum dipilih'}
+                      Rp {shippingCost.toLocaleString('id-ID')}
                     </span>
                   </div>
 
                   <div className="divider my-1" />
 
                   <div className="flex justify-between text-base font-bold text-zinc-900 pt-1">
-                    <span>Total Belanja:</span>
+                    <span>Total Tagihan:</span>
                     <span className="text-emerald-700">
-                      Rp {subtotal.toLocaleString('id-ID')}
+                      Rp {grandTotal.toLocaleString('id-ID')}
                     </span>
                   </div>
                 </div>

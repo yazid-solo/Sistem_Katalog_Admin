@@ -18,10 +18,11 @@ Sistem Web Inventaris & Penjualan Pakaian Profesional dengan **arsitektur realti
 
 ## 🌟 Fitur Utama & Otomatisasi Sistem
 
-### 1. Etalase Produk Realistis & Autentik
-- **12 Produk Fashion Indonesia Asli**: Kemeja Oxford Button-Down, Linen Collarless Shirt, Selvedge Denim Pants, Pima Cotton Tee, Knit Cardigan, Pleated Wrap Skirt, dsb.
-- **89 Varian Multi-Dimensi Lengkap**: Informasi metrik pakaian riil: Lingkar Dada (LD), Panjang Baju (PB), Lebar Bahu, Panjang Lengan, dan Lingkar Pinggang (LP) dalam satuan sentimeter (cm).
-- **Panduan Ukuran Pintar**: Rekomendasi ukuran otomatis berdasarkan Berat Badan (BB) dan Tinggi Badan (TB).
+### 1. Etalase Produk Realistis & Lengkap (12 Jenis Pakaian & 9 Kategori)
+- **12 Jenis Pakaian Utama**: Kulot, Kulot Polos, Celana Pendek, Bogo, Kaos, Daster, Setelan Panjang/Pendek, Setelan Anak, Kain Pantai, Outer, Mukena, dan Hijab.
+- **9 Kategori Terkurasi**: `Kulot`, `Celana Pendek & Bogo`, `Daster`, `Setelan`, `Setelan Anak`, `Kaos`, `Outer`, `Kain Pantai`, dan `Mukena & Hijab`.
+- **Dukungan Ukuran Lengkap (Semua Size)**: Mendukung ukuran `ALL SIZE`, `STANDAR`, `JUMBO`, serta `S, M, L, XL, XXL` di seluruh produk dengan metrik otomatis yang menyesuaikan jenis pakaian (Lingkar Dada/LD, Panjang Baju/PB, Lingkar Pinggang/LP Melar, hingga dimensi Panjang × Lebar untuk Kain Pantai & Hijab).
+- **Panduan Ukuran Pintar**: Tabel ukuran otomatis yang beradaptasi untuk Atasan/Daster, Bawahan (Kulot/Bogo), Setelan, Mukena, maupun Hijab/Kain Pantai.
 
 ### 2. Transaksi Realtime & Pengurangan Stok Otomatis
 - **Atomic Stock Deduction**: Menggunakan `transaction.atomic()` dengan kunci baris database (`select_for_update`), mencegah *race condition* atau *overselling* saat pesanan masuk secara bersamaan.

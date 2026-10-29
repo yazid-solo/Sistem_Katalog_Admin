@@ -1,25 +1,14 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import Image from 'next/image';
-import Link from 'next/link';
-import { getProductDetail, getProducts } from '@/lib/api';
+import { getProductDetail } from '@/lib/api';
 import Navbar from '@/components/Navbar';
 import ProductDetailClient from '@/components/ProductDetailClient';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 interface PageProps {
   params: { slug: string };
-}
-
-// ─────────────────────────────────────────
-// Generate static params for popular products
-// ─────────────────────────────────────────
-export async function generateStaticParams() {
-  try {
-    const data = await getProducts({ page: 1 });
-    return data.results.map((p) => ({ slug: p.slug }));
-  } catch {
-    return [];
-  }
 }
 
 // ─────────────────────────────────────────
@@ -61,7 +50,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
       <Navbar />
 
       <main className="min-h-screen pt-20 pb-32 md:pb-16 bg-[#FAF9F6]/40">
-        <div className="max-w-screen-xl mx-auto px-6 md:px-10">
+        <div className="max-w-screen-xl mx-auto px-4 sm:px-6 md:px-10">
           {/* ── Main Interactive Marketplace View ── */}
           <ProductDetailClient product={product} />
         </div>

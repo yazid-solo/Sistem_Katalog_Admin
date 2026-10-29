@@ -211,10 +211,13 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
 
   const colors = product?.variants_by_color || [];
 
-  // Initial color
+  // Initial color & auto-selected first available size
   const initialColor = colors[0]?.color ?? '';
+  const initialAvailableSize =
+    (colors[0]?.sizes || []).find((s) => s.is_available && s.stock_quantity > 0)?.size ?? null;
   const [selectedColor, setSelectedColor] = useState<string>(initialColor);
-  const [selectedSize, setSelectedSize] = useState<string | null>(null);
+  const [selectedSize, setSelectedSize] = useState<string | null>(initialAvailableSize);
+  const [selectedQty, setSelectedQty] = useState<number>(1);
   const [isSizeGuideOpen, setIsSizeGuideOpen] = useState<boolean>(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
 
@@ -241,10 +244,26 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
     ? (product?.variants || []).find((v) => v.size === selectedSize && v.color === selectedColor)
     : null;
 
-  // When user clicks a color
+  // When user clicks a color, preserve selectedSize if still available; otherwise pick first available size
   const handleColorChange = (newColor: string) => {
     setSelectedColor(newColor);
-    setSelectedSize(null);
+
+    const newColorData = colors.find(
+      (c) => c.color.toLowerCase().trim() === newColor.toLowerCase().trim()
+    );
+    const newSizes = newColorData?.sizes || [];
+    const stillAvailable = selectedSize
+      ? newSizes.find((s) => s.size === selectedSize && s.is_available && s.stock_quantity > 0)
+      : null;
+
+    if (stillAvailable) {
+      setSelectedSize(stillAvailable.size);
+      setSelectedQty((q) => Math.min(q, stillAvailable.stock_quantity));
+    } else {
+      const firstAvail = newSizes.find((s) => s.is_available && s.stock_quantity > 0);
+      setSelectedSize(firstAvail ? firstAvail.size : null);
+      setSelectedQty(1);
+    }
 
     const matchingColorImg = (product?.images || []).find(
       (img) => img.color && img.color.toLowerCase().trim() === newColor.toLowerCase().trim()
@@ -252,13 +271,8 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
 
     if (matchingColorImg?.image_url) {
       setActiveImage(matchingColorImg.image_url);
-    } else {
-      const colorData = colors.find(
-        (c) => c.color.toLowerCase().trim() === newColor.toLowerCase().trim()
-      );
-      if (colorData?.color_image) {
-        setActiveImage(colorData.color_image);
-      }
+    } else if (newColorData?.color_image) {
+      setActiveImage(newColorData.color_image);
     }
   };
 
@@ -275,6 +289,8 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
       return;
     }
 
+    const safeQty = Math.min(Math.max(1, selectedQty), selectedVariant.stock_quantity);
+
     addToCart({
       variantId: selectedVariant.id,
       productId: product.id,
@@ -284,24 +300,23 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
       size: selectedSize,
       price: parseFloat(product.base_price),
       imageUrl: activeImage,
-      quantity: 1,
+      quantity: safeQty,
       maxStock: selectedVariant.stock_quantity,
     });
 
     if (redirectAfter) {
       router.push('/keranjang');
     } else {
-      setToastMsg(`✓ ${product.title} (${selectedColor} - ${selectedSize}) masuk keranjang!`);
+      setToastMsg(`✓ ${safeQty} pcs ${product.title} (${selectedColor} - ${selectedSize}) masuk keranjang!`);
       setTimeout(() => setToastMsg(null), 4000);
     }
   };
 
-  // WhatsApp URL
+  // WhatsApp URL (rotasi otomatis bergantian antara Admin 1 & Admin 2)
   const whatsappUrl = generateWhatsAppLink(
     product.title,
     selectedSize ?? undefined,
-    selectedColor || undefined,
-    process.env.NEXT_PUBLIC_WHATSAPP_NUMBER
+    selectedColor || undefined
   );
 
   // Lightbox helpers
@@ -417,8 +432,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
                           (c) => c.color.toLowerCase().trim() === imgColor.toLowerCase().trim()
                         );
                         if (matchingColor && matchingColor.color !== selectedColor) {
-                          setSelectedColor(matchingColor.color);
-                          setSelectedSize(null);
+                          handleColorChange(matchingColor.color);
                         }
                       }
                     }}
@@ -497,9 +511,9 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
             <div className="space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                 <p className="text-xs font-semibold tracking-wider uppercase text-zinc-900">
-                  Pilihan Warna: <span className="font-normal text-stone-500">{selectedColor}</span>
+                  Pilihan Warna / Motif: <span className="font-normal text-stone-500">{selectedColor}</span>
                 </p>
-                <span className="text-[11px] text-stone-400">Klik warna untuk lihat fotonya</span>
+                <span className="text-[11px] text-stone-400">Klik pilihan untuk lihat fotonya</span>
               </div>
 
               <div className="flex flex-wrap gap-2.5">
@@ -565,7 +579,12 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
                     key={variant.size}
                     type="button"
                     id={`size-${variant.size}`}
-                    onClick={() => !isSoldOut && setSelectedSize(isSelected ? null : variant.size)}
+                    onClick={() => {
+                      if (!isSoldOut) {
+                        setSelectedSize(variant.size);
+                        setSelectedQty((q) => Math.min(Math.max(1, q), variant.stock_quantity));
+                      }
+                    }}
                     disabled={isSoldOut}
                     aria-pressed={isSelected}
                     aria-label={`Ukuran ${variant.size}${isSoldOut ? ' - Habis' : ''}`}
@@ -601,7 +620,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
                         className={`px-2 py-0.5 rounded-lg text-[11px] font-medium border ${
                           !sizeInfo || sizeInfo.stock_quantity === 0
                             ? 'bg-rose-50 border-rose-200 text-rose-700 line-through'
-                            : sizeInfo.stock_quantity <= 3
+                            : sizeInfo.stock_quantity <= 5
                             ? 'bg-amber-50 border-amber-200 text-amber-800'
                             : 'bg-emerald-50 border-emerald-200 text-emerald-800'
                         }`}
@@ -624,7 +643,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
                   <span className={`font-semibold px-2 py-0.5 rounded-md text-[11px] ${
                     selectedVariant.stock_quantity === 0
                       ? 'bg-rose-100 text-rose-800'
-                      : selectedVariant.stock_quantity <= 3
+                      : selectedVariant.stock_quantity <= 5
                       ? 'bg-amber-100 text-amber-800'
                       : 'bg-emerald-100 text-emerald-800'
                   }`}>
@@ -650,7 +669,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
           </div>
 
           {/* Stock Warning */}
-          {selectedVariant && selectedVariant.stock_quantity > 0 && selectedVariant.stock_quantity <= 3 && (
+          {selectedVariant && selectedVariant.stock_quantity > 0 && selectedVariant.stock_quantity <= 5 && (
             <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200/80 rounded-xl">
               <span className="text-amber-600 text-sm">⚠️</span>
               <p className="text-xs text-amber-900">
@@ -659,8 +678,51 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
             </div>
           )}
 
-          {/* ─── ACTION BUTTONS ─── */}
+          {/* ─── QUANTITY & ACTION BUTTONS ─── */}
           <div className="pt-4 space-y-3">
+            {selectedVariant && selectedVariant.is_available && (
+              <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-stone-50 border border-stone-200/80">
+                <div>
+                  <p className="text-xs font-semibold text-zinc-900">Jumlah Pembelian</p>
+                  <p className="text-[11px] text-stone-500">
+                    Subtotal: <strong className="text-zinc-900">Rp {(parseFloat(product.base_price) * selectedQty).toLocaleString('id-ID')}</strong>
+                  </p>
+                </div>
+                <div className="flex items-center border border-stone-300 rounded-xl bg-white overflow-hidden shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedQty((q) => Math.max(1, q - 1))}
+                    disabled={selectedQty <= 1}
+                    className="w-9 h-9 flex items-center justify-center text-zinc-800 hover:bg-stone-100 disabled:text-stone-300 font-bold text-sm transition-colors cursor-pointer"
+                    aria-label="Kurangi jumlah"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    max={selectedVariant.stock_quantity}
+                    value={selectedQty}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (isNaN(val)) setSelectedQty(1);
+                      else setSelectedQty(Math.min(Math.max(1, val), selectedVariant.stock_quantity));
+                    }}
+                    className="w-11 text-center text-xs font-bold text-zinc-900 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setSelectedQty((q) => Math.min(selectedVariant.stock_quantity, q + 1))}
+                    disabled={selectedQty >= selectedVariant.stock_quantity}
+                    className="w-9 h-9 flex items-center justify-center text-zinc-800 hover:bg-stone-100 disabled:text-stone-300 font-bold text-sm transition-colors cursor-pointer"
+                    aria-label="Tambah jumlah"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 type="button"
@@ -701,6 +763,14 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 pt-1">
               <a
                 href={whatsappUrl}
+                onClick={(e) => {
+                  const freshUrl = generateWhatsAppLink(
+                    product.title,
+                    selectedSize ?? undefined,
+                    selectedColor || undefined
+                  );
+                  e.currentTarget.href = freshUrl;
+                }}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 text-xs text-stone-500 hover:text-emerald-700 transition-colors py-1"
@@ -789,6 +859,7 @@ export default function ProductDetailClient({ product }: ProductDetailClientProp
         onClose={() => setIsSizeGuideOpen(false)}
         sizeChart={product.size_chart}
         categoryName={product.category?.name || 'Pakaian'}
+        productTitle={product.title}
         customNotes={product.size_guide}
       />
 

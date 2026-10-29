@@ -78,7 +78,7 @@ export default function ProductCard({ product, priority = false }: ProductCardPr
         {/* Hover Sizes Quick Preview */}
         {product.available_sizes && product.available_sizes.length > 0 && (
           <div className="absolute bottom-0 inset-x-0 p-2.5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-t from-black/60 via-black/30 to-transparent hidden sm:flex items-center justify-center gap-1 flex-wrap">
-            {product.available_sizes.slice(0, 6).map((s) => (
+            {product.available_sizes.slice(0, 8).map((s) => (
               <span
                 key={s.size}
                 className={`text-[9px] font-bold px-2 py-0.5 rounded-md backdrop-blur-sm transition-transform ${
