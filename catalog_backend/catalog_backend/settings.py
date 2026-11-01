@@ -70,19 +70,42 @@ TEMPLATES = [
 WSGI_APPLICATION = 'catalog_backend.wsgi.application'
 
 # ─────────────────────────────────────────
-# DATABASE — PostgreSQL
+# DATABASE — PostgreSQL (Mendukung Neon Cloud & Local Docker)
 # ─────────────────────────────────────────
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('DB_NAME', default='katalog_pakaian'),
-        'USER': config('DB_USER', default='katalog_user'),
-        'PASSWORD': config('DB_PASSWORD', default=''),
-        'HOST': config('DB_HOST', default='localhost'),
-        'PORT': config('DB_PORT', default='5432'),
-        'CONN_MAX_AGE': 60,
+DATABASE_URL = config('DATABASE_URL', default=None)
+
+if DATABASE_URL:
+    import urllib.parse
+    parsed_db = urllib.parse.urlparse(DATABASE_URL)
+    qs = urllib.parse.parse_qs(parsed_db.query)
+    db_options = {}
+    if 'sslmode' in qs:
+        db_options['sslmode'] = qs['sslmode'][0]
+
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': parsed_db.path[1:],
+            'USER': parsed_db.username,
+            'PASSWORD': parsed_db.password,
+            'HOST': parsed_db.hostname,
+            'PORT': parsed_db.port or '5432',
+            'CONN_MAX_AGE': 60,
+            'OPTIONS': db_options,
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': config('DB_NAME', default='katalog_pakaian'),
+            'USER': config('DB_USER', default='katalog_user'),
+            'PASSWORD': config('DB_PASSWORD', default=''),
+            'HOST': config('DB_HOST', default='localhost'),
+            'PORT': config('DB_PORT', default='5432'),
+            'CONN_MAX_AGE': 60,
+        }
+    }
 
 # ─────────────────────────────────────────
 # PASSWORD VALIDATION
