@@ -13,11 +13,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-fallback-key')
 DEBUG = config('DEBUG', default=True, cast=bool)
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1').split(',')
-if DEBUG:
-    # Allow tunneling domains during development/sharing (Cloudflare, Ngrok, Localtunnel)
-    for host in ['*', '.trycloudflare.com', '.ngrok-free.app', '.ngrok.io', '.loca.lt', 'frontend', 'backend']:
-        if host not in ALLOWED_HOSTS:
-            ALLOWED_HOSTS.append(host)
+# Allow Vercel, tunneling domains, and container hosts
+for host in ['*', '.vercel.app', '.trycloudflare.com', '.ngrok-free.app', '.ngrok.io', '.loca.lt', 'frontend', 'backend']:
+    if host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(host)
 
 # ─────────────────────────────────────────
 # APPLICATIONS
@@ -175,17 +174,17 @@ CORS_ALLOWED_ORIGINS = config(
 ).split(',')
 
 CORS_ALLOW_CREDENTIALS = True
-if DEBUG:
-    CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = True
 
 # ─────────────────────────────────────────
-# CSRF TRUSTED ORIGINS — Allow Admin Login via Nginx
+# CSRF TRUSTED ORIGINS — Allow Admin Login via Nginx & Vercel
 # ─────────────────────────────────────────
 CSRF_TRUSTED_ORIGINS = [
     'http://localhost',
     'http://127.0.0.1',
     'http://localhost:8000',
     'http://localhost:3000',
+    'https://*.vercel.app',
     'https://*.trycloudflare.com',
     'https://*.ngrok-free.app',
     'https://*.ngrok.io',
