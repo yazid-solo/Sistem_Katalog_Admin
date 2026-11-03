@@ -101,6 +101,17 @@ services:
       - frontend
       - backend
 
+  # ─────────────────────────────────────────
+  # 5. TUNNEL — Cloudflare Quick Tunnel (Akses Online 100% Gratis)
+  # ─────────────────────────────────────────
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: katalog_tunnel
+    restart: unless-stopped
+    command: tunnel --url http://nginx:80 --no-autoupdate
+    depends_on:
+      - nginx
+
 volumes:
   postgres_data:
     driver: local
