@@ -460,9 +460,19 @@ export default function AdminTokoPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: passwordInput }),
       });
-      const data = await res.json();
+
+      let data: any = {};
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json();
+        } catch {
+          data = {};
+        }
+      }
+
       if (!res.ok) {
-        throw new Error(data.error || data.detail || 'Kata sandi atau PIN admin salah.');
+        throw new Error(data.error || data.detail || (res.status === 401 ? 'Kata sandi atau PIN admin salah.' : 'Terjadi kendala pada server backend. Silakan coba sesaat lagi.'));
       }
       const now = Date.now();
       // Simpan token dan cap waktu aktivitas aktif 24 jam
@@ -475,7 +485,12 @@ export default function AdminTokoPage() {
       setIsAuthenticated(true);
       setPasswordInput('');
     } catch (err: any) {
-      setLoginError(err.message);
+      const msg = err?.message || '';
+      if (msg.includes('JSON') || msg.includes('token') || msg.includes('<!DOCTYPE') || msg.includes('Unexpected')) {
+        setLoginError('Terjadi kendala pada koneksi server backend. Silakan coba sesaat lagi.');
+      } else {
+        setLoginError(msg || 'Kata sandi atau PIN admin salah.');
+      }
     }
   };
 

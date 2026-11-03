@@ -18,6 +18,9 @@ for host in ['*', '.vercel.app', '.trycloudflare.com', '.ngrok-free.app', '.ngro
     if host not in ALLOWED_HOSTS:
         ALLOWED_HOSTS.append(host)
 
+# Jangan lempar error jika URL POST tidak memiliki trailing slash (Next.js proxy compatibility)
+APPEND_SLASH = False
+
 # ─────────────────────────────────────────
 # APPLICATIONS
 # ─────────────────────────────────────────

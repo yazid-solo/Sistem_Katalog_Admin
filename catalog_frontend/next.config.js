@@ -35,8 +35,16 @@ const nextConfig = {
     return [
       // Proxy API calls to avoid CORS in browser
       {
+        source: '/api/:path*/',
+        destination: `${backendUrl}/api/:path*/`,
+      },
+      {
         source: '/api/:path*',
         destination: `${backendUrl}/api/:path*`,
+      },
+      {
+        source: '/media/:path*/',
+        destination: `${backendUrl}/media/:path*/`,
       },
       {
         source: '/media/:path*',
